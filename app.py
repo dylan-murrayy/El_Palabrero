@@ -61,9 +61,9 @@ def chat_handling(user_input):
     with st.spinner("Generating AI response..."):
         client = st.session_state['openai_client']
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             messages=st.session_state['chat_history'] + [{"role": "user", "content": user_input}],
-            temperature=0.7,
+            temperature=0.5,
             max_tokens=150,
         )
     ai_message = response.choices[0].message.content

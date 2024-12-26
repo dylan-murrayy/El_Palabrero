@@ -3,4 +3,4 @@ openai
 pandas
 matplotlib
 datetime
-sqlite3
+pysqlite3
