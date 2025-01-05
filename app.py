@@ -3,17 +3,18 @@
 # Date: 2023-10-10
 
 import streamlit as st
-from openai import OpenAI  # Updated import statement
+from openai import OpenAI
 import pandas as pd
 import matplotlib.pyplot as plt
 import datetime
 import sqlite3
 import re
 
-# Set page configuration
+# -----------------------------
+# 1. PAGE & SESSION CONFIG
+# -----------------------------
 st.set_page_config(page_title="Palabrero", page_icon="🌟", layout="wide")
 
-# Initialize session state variables
 if 'chat_history' not in st.session_state:
     st.session_state['chat_history'] = []
 
@@ -29,23 +30,37 @@ if 'api_key' not in st.session_state:
 if 'openai_client' not in st.session_state:
     st.session_state['openai_client'] = None
 
-# Function to securely get the API key from the user
+# -----------------------------
+# 2. LOAD SYSTEM PROMPT (.md)
+# -----------------------------
+def load_system_prompt(file_path="system_prompt.md"):
+    """Load the system prompt from a local Markdown file."""
+    with open(file_path, "r", encoding="utf-8") as f:
+        return f.read()
+
+# Initialize system prompt in session state (only once)
+if 'system_prompt' not in st.session_state:
+    st.session_state['system_prompt'] = load_system_prompt("system_prompt.md")
+
+# -----------------------------
+# 3. SETUP FUNCTIONS
+# -----------------------------
 def get_api_key():
+    """Securely get the API key from the user."""
     st.sidebar.title("API Key Setup")
     api_key = st.sidebar.text_input("Enter your OpenAI API Key:", type="password")
     if api_key:
         st.session_state['api_key'] = api_key
 
-# Function to initialize the OpenAI client
 def initialize_openai_client():
+    """Initialize the OpenAI client with the stored API key."""
     if st.session_state['api_key'] and st.session_state['openai_client'] is None:
         st.session_state['openai_client'] = OpenAI(api_key=st.session_state['api_key'])
 
-# Function to initialize the database and create tables
 def initialize_database():
+    """Initialize the local SQLite database and create necessary tables."""
     conn = sqlite3.connect('palabrero.db')
     c = conn.cursor()
-    # Create chats table if it doesn't exist
     c.execute('''
         CREATE TABLE IF NOT EXISTS chats (
             name TEXT UNIQUE,
@@ -55,45 +70,67 @@ def initialize_database():
     conn.commit()
     conn.close()
 
-# Function to handle chat interactions with the AI
+# -----------------------------
+# 4. CHAT HANDLER
+# -----------------------------
 def chat_handling(user_input):
-    # Display a loading spinner while generating the AI response
+    """Handles the chat flow: sends user input + system message to the model."""
     with st.spinner("Generating AI response..."):
         client = st.session_state['openai_client']
+        
+        # Prepend system prompt to the messages
+        system_message = {
+            "role": "system",
+            "content": st.session_state['system_prompt']
+        }
+        
+        # Build the messages list: system -> history -> user
+        messages = [system_message] + st.session_state['chat_history'] + [
+            {"role": "user", "content": user_input}
+        ]
+
         response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=st.session_state['chat_history'] + [{"role": "user", "content": user_input}],
+            model="gpt-4o",  # Update the model name if needed (e.g., "gpt-3.5-turbo" or "gpt-4")
+            messages=messages,
             temperature=0.5,
             max_tokens=150,
         )
+    
     ai_message = response.choices[0].message.content
+    
     # Update chat history
     st.session_state['chat_history'].append({"role": "user", "content": user_input})
     st.session_state['chat_history'].append({"role": "assistant", "content": ai_message})
-    # Update vocabulary tracking
+
+    # Update vocabulary
     update_vocabulary(user_input, ai_message)
+
     return ai_message
 
-# Function to update active and passive vocabulary lists
+# -----------------------------
+# 5. VOCABULARY FUNCTIONS
+# -----------------------------
 def update_vocabulary(user_text, ai_text):
+    """Extract words and update user and AI vocabulary lists."""
     user_words = extract_words(user_text)
     ai_words = extract_words(ai_text)
     st.session_state['user_vocabulary'].update(user_words)
     st.session_state['ai_vocabulary'].update(ai_words)
 
-# Function to extract words from text using regex
 def extract_words(text):
+    """Extract words from text using regex and filter for Spanish."""
     words = re.findall(r'\b\w+\b', text.lower(), re.UNICODE)
     spanish_words = [word for word in words if is_spanish_word(word)]
     return set(spanish_words)
 
-# Placeholder function to check if a word is Spanish
 def is_spanish_word(word):
-    # For simplicity, assume all words are Spanish
-    # Integrate with a Spanish dictionary API or word list for real implementation
+    """Placeholder function to check if a word is Spanish. 
+    Integrate with a dictionary or API for real usage."""
     return True
 
-# Function to display the chat interface
+# -----------------------------
+# 6. CHAT DISPLAY
+# -----------------------------
 def display_chat():
     st.title("Palabrero - Aprende Español")
     chat_container = st.container()
@@ -104,13 +141,14 @@ def display_chat():
             else:
                 st.markdown(f"**AI:** {message['content']}")
 
-# Function to display live vocabulary metrics
+# -----------------------------
+# 7. VOCAB METRICS & ANALYTICS
+# -----------------------------
 def display_vocabulary_metrics():
     st.sidebar.header("Vocabulary Metrics")
     st.sidebar.metric("Active Vocabulary", len(st.session_state['user_vocabulary']))
     st.sidebar.metric("Passive Vocabulary", len(st.session_state['ai_vocabulary']))
 
-# Function to display the analytics dashboard
 def analytics_dashboard():
     st.header("Analytics Dashboard")
     # Create a DataFrame for the user's vocabulary
@@ -126,7 +164,6 @@ def analytics_dashboard():
     growth_data = vocab_data['Date'].value_counts().sort_index()
     st.line_chart(growth_data)
 
-# Function to export vocabulary data as CSV
 def export_vocabulary():
     vocab_df = pd.DataFrame({
         'Word': list(st.session_state['user_vocabulary'])
@@ -134,8 +171,11 @@ def export_vocabulary():
     csv = vocab_df.to_csv(index=False)
     st.download_button("Download Vocabulary as CSV", csv, "vocabulary.csv", "text/csv")
 
-# Function to save the current chat history with a custom name
+# -----------------------------
+# 8. SAVE/LOAD CHAT
+# -----------------------------
 def save_chat(name):
+    """Save the current chat history to the local database."""
     try:
         conn = sqlite3.connect('palabrero.db')
         c = conn.cursor()
@@ -147,18 +187,18 @@ def save_chat(name):
             )
         ''')
         # Insert or replace chat history
-        c.execute('INSERT OR REPLACE INTO chats (name, history) VALUES (?, ?)', (name, str(st.session_state['chat_history'])))
+        c.execute('INSERT OR REPLACE INTO chats (name, history) VALUES (?, ?)', 
+                  (name, str(st.session_state['chat_history'])))
         conn.commit()
         conn.close()
         st.success(f"Chat '{name}' saved successfully!")
     except sqlite3.Error as e:
         st.error(f"An error occurred while saving the chat: {e}")
 
-# Function to retrieve a list of saved chats
 def load_saved_chats():
+    """Retrieve a list of saved chat names from the local database."""
     conn = sqlite3.connect('palabrero.db')
     c = conn.cursor()
-    # Ensure the table exists
     c.execute('''
         CREATE TABLE IF NOT EXISTS chats (
             name TEXT UNIQUE,
@@ -170,8 +210,8 @@ def load_saved_chats():
     conn.close()
     return [chat[0] for chat in chats]
 
-# Function to load a saved chat by name
 def load_chat(name):
+    """Load a saved chat from the local database by name."""
     try:
         conn = sqlite3.connect('palabrero.db')
         c = conn.cursor()
@@ -184,9 +224,11 @@ def load_chat(name):
     except sqlite3.Error as e:
         st.error(f"An error occurred while loading the chat: {e}")
 
-# Main function to orchestrate the app logic
+# -----------------------------
+# 9. MAIN APP LOGIC
+# -----------------------------
 def main():
-    initialize_database()  # Initialize the database at startup
+    initialize_database()  
     get_api_key()
     if st.session_state['api_key'] == '':
         st.warning("Please enter your OpenAI API key to continue.")
@@ -201,12 +243,13 @@ def main():
     display_chat()
     display_vocabulary_metrics()
 
-    # User input area for sending messages
+    # User input
     user_input = st.text_input("Escribe tu mensaje en español:")
     if st.button("Enviar"):
         if user_input:
             ai_response = chat_handling(user_input)
-            st.rerun()  # Updated function call
+            # Replace st.experimental_rerun() with st.rerun()
+            st.rerun()
 
     # Button to save the current chat
     if st.button("Save Chat"):
@@ -220,7 +263,8 @@ def main():
     selected_chat = st.sidebar.selectbox("Select a chat to load", [""] + saved_chats)
     if selected_chat:
         load_chat(selected_chat)
-        st.rerun()  # Updated function call
+        # Replace st.experimental_rerun() with st.rerun()
+        st.rerun()
 
     st.sidebar.header("Analytics")
     if st.sidebar.button("Show Analytics Dashboard"):
@@ -228,8 +272,6 @@ def main():
     if st.sidebar.button("Export Vocabulary"):
         export_vocabulary()
 
-
-
-# Run the main function when the script is executed
+# Run the main function
 if __name__ == "__main__":
     main()
