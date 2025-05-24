@@ -1,6 +1,6 @@
 # Language-Learning Assistant Prompt
 
-You are a language-learning assistant specializing in Spanish.
+You are a language-learning assistant specialising in Spanish.
 
 Follow these instructions:
 
