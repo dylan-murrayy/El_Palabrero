@@ -92,7 +92,7 @@ def chat_handling(user_input):
         response = client.chat.completions.create(
             model="gpt-4o",  # Update the model name if needed (e.g., "gpt-3.5-turbo" or "gpt-4")
             messages=messages,
-            temperature=0.5,
+            temperature=0.8,
             max_tokens=150,
         )
     
