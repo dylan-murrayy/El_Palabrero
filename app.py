@@ -247,7 +247,7 @@ ALLOWED_VOCAB_CATEGORIES = [
 ]
 
 def analyze_user_message(user_text):
-    """Call GPT-4.1-mini to analyse the learner's message."""
+    """Call OpenAI to analyse the learner's message and return structured JSON."""
     client = st.session_state.get('openai_client')
     if not user_text.strip():
         return None
@@ -328,13 +328,12 @@ def analyze_user_message(user_text):
         f"Allowed vocabulary categories: {', '.join(ALLOWED_VOCAB_CATEGORIES)}."
     )
 
+    prompt = f"{system_instructions}\n\nMENSAJE DEL ESTUDIANTE (en español):\n{user_text}"
+
     try:
-        response = client.chat.completions.create(
+        response = client.responses.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_instructions},
-                {"role": "user", "content": user_text}
-            ],
+            input=prompt,
             response_format={
                 "type": "json_schema",
                 "json_schema": {
@@ -349,7 +348,19 @@ def analyze_user_message(user_text):
         st.warning(f"No se pudo analizar el mensaje con GPT: {err}")
         return build_fallback_analysis(user_text, reason=str(err))
 
-    analysis_text = response.choices[0].message.content if response.choices else None
+    analysis_text = None
+    # Try the convenience attribute first (if available)
+    analysis_text = getattr(response, "output_text", None)
+
+    # Fallback: walk the output structure to collect text content
+    if not analysis_text and getattr(response, "output", None):
+        chunks = []
+        for item in response.output:
+            for content in getattr(item, "content", []) or []:
+                text_value = getattr(content, "text", None)
+                if text_value:
+                    chunks.append(text_value)
+        analysis_text = "".join(chunks).strip() if chunks else None
 
     if not analysis_text:
         st.info("El modelo no devolvió contenido. Usando análisis heurístico local.")
@@ -539,6 +550,7 @@ def analytics_dashboard():
             analysis_data = entry.get("analysis")
             if not analysis_data:
                 continue
+            analysis_source = (analysis_data or {}).get("source", "gpt")
             analysis_available = True
             analyzed_messages += 1
 
@@ -574,8 +586,22 @@ def analytics_dashboard():
                 topics = sentence.get("topics", [])
                 vocab_items = sentence.get("notable_vocabulary", [])
 
+                # Always track the words themselves (for vocabulary size/frequency)
+                for vocab_item in vocab_items:
+                    word = vocab_item.get("word")
+                    if word:
+                        word_lower = word.lower()
+                        vocab_counter[word_lower] += 1
+                        conversation_vocab.add(word_lower)
+
+                # Only treat labels from true GPT analyses as trustworthy for charts
+                if analysis_source != "gpt":
+                    continue
+
                 for tense in detected_tenses:
-                    normalized_tense = tense if tense in ALLOWED_TENSES else "other"
+                    normalized_tense = (tense or "").strip().lower()
+                    if normalized_tense not in ALLOWED_TENSES:
+                        normalized_tense = "other"
                     tense_counter[normalized_tense] += 1
                     conversation_tenses[normalized_tense] += 1
                     tense_timeline_records.append({
@@ -588,25 +614,34 @@ def analytics_dashboard():
                     })
 
                 for err in error_types:
-                    normalized_error = err if err in ALLOWED_ERROR_TYPES else "other"
+                    normalized_error = (err or "").strip().lower()
+                    if normalized_error == "none":
+                        continue
+                    if normalized_error not in ALLOWED_ERROR_TYPES:
+                        normalized_error = "other"
                     error_counter[normalized_error] += 1
                     conversation_errors[normalized_error] += 1
 
                 for topic in topics:
-                    normalized_topic = topic if topic in ALLOWED_TOPICS else "other"
+                    normalized_topic = (topic or "").strip().lower()
+                    if normalized_topic == "other":
+                        continue
+                    if normalized_topic not in ALLOWED_TOPICS:
+                        normalized_topic = "other"
                     topic_counter[normalized_topic] += 1
                     conversation_topics[normalized_topic] += 1
 
                 for vocab_item in vocab_items:
-                    word = vocab_item.get("word")
                     category = vocab_item.get("category")
-                    if word:
-                        word_lower = word.lower()
-                        vocab_counter[word_lower] += 1
-                        conversation_vocab.add(word_lower)
-                    if category:
-                        normalized_category = category if category in ALLOWED_VOCAB_CATEGORIES else "other"
-                        vocab_category_counter[normalized_category] += 1
+                    if not category:
+                        continue
+                    normalized_category = (category or "").strip().lower()
+                    # Skip generic review category so focus areas highlight more informative labels
+                    if normalized_category == "review-word":
+                        continue
+                    if normalized_category not in ALLOWED_VOCAB_CATEGORIES:
+                        normalized_category = "other"
+                    vocab_category_counter[normalized_category] += 1
 
         if analyzed_messages == 0:
             chats_missing_analysis.append(chat["name"])
