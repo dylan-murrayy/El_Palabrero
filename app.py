@@ -44,15 +44,8 @@ if 'message_analytics' not in st.session_state:
 # -----------------------------
 def load_system_prompt(file_path="system_prompt.md"):
     """Load the system prompt from a local Markdown file."""
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        st.warning(f"System prompt file '{file_path}' not found. Using default prompt.")
-        return "You are Palabrero, a helpful Spanish language learning assistant."
-    except OSError as err:
-        st.error(f"Unable to load system prompt from '{file_path}': {err}")
-        return "You are Palabrero, a helpful Spanish language learning assistant."
+    with open(file_path, "r", encoding="utf-8") as f:
+        return f.read()
 
 # Initialize system prompt in session state (only once)
 if 'system_prompt' not in st.session_state:
@@ -113,7 +106,7 @@ def chat_handling(user_input):
         ]
 
         response = client.chat.completions.create(
-            model="gpt-5-mini",  # Update the model name if needed (e.g., "gpt-3.5-turbo" or "gpt-4")
+            model="gpt-4o",  # Update the model name if needed (e.g., "gpt-3.5-turbo" or "gpt-4")
             messages=messages,
             temperature=0.8,
             max_tokens=150,
@@ -254,7 +247,7 @@ ALLOWED_VOCAB_CATEGORIES = [
 ]
 
 def analyze_user_message(user_text):
-    """Call GPT-5-minii to analyse the learner's message."""
+    """Call GPT-4.1-mini to analyse the learner's message."""
     client = st.session_state.get('openai_client')
     if not user_text.strip():
         return None
@@ -337,7 +330,7 @@ def analyze_user_message(user_text):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-5-mini",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_instructions},
                 {"role": "user", "content": user_text}
@@ -353,7 +346,7 @@ def analyze_user_message(user_text):
             temperature=0.2,
         )
     except Exception as err:
-        st.warning(f"No se pudo analizar el mensaje con GPT-5-mini: {err}")
+        st.warning(f"No se pudo analizar el mensaje con GPT: {err}")
         return build_fallback_analysis(user_text, reason=str(err))
 
     analysis_text = response.choices[0].message.content if response.choices else None
@@ -462,7 +455,7 @@ def display_vocabulary_metrics():
 
 def analytics_dashboard():
     st.title("Learning Analytics Dashboard")
-    st.caption("Insights generated from GPT-5-mini sentence-level evaluations.")
+    st.caption("Insights generated from GPT-4.1-mini sentence-level evaluations.")
 
     with st.sidebar:
         if st.button("Back to Chat"):
@@ -709,10 +702,16 @@ def analytics_dashboard():
         if has_timestamp:
             growth_chart_df = growth_df.dropna(subset=['Saved At']).copy()
             growth_chart_df['Saved At'] = pd.to_datetime(growth_chart_df['Saved At'])
-            growth_chart = alt.Chart(growth_chart_df).mark_line(point=True).encode(
-                x=alt.X('Saved At:T', title='Saved At'),
+            growth_chart_df['Saved Date'] = growth_chart_df['Saved At'].dt.normalize()
+            daily_growth_df = (
+                growth_chart_df
+                .groupby('Saved Date', as_index=False)['Cumulative Unique Words']
+                .max()
+            )
+            growth_chart = alt.Chart(daily_growth_df).mark_line(point=True).encode(
+                x=alt.X('Saved Date:T', title='Date'),
                 y=alt.Y('Cumulative Unique Words:Q', title='Cumulative Unique Words'),
-                tooltip=['Saved At:T', 'Cumulative Unique Words:Q']
+                tooltip=['Saved Date:T', 'Cumulative Unique Words:Q']
             ).properties(height=300)
         else:
             growth_chart = alt.Chart(growth_df).mark_line(point=True).encode(
@@ -727,10 +726,16 @@ def analytics_dashboard():
         if has_timestamp:
             new_words_chart_df = new_words_df.dropna(subset=['Saved At']).copy()
             new_words_chart_df['Saved At'] = pd.to_datetime(new_words_chart_df['Saved At'])
-            new_words_chart = alt.Chart(new_words_chart_df).mark_bar().encode(
-                x=alt.X('Saved At:T', title='Saved At'),
+            new_words_chart_df['Saved Date'] = new_words_chart_df['Saved At'].dt.normalize()
+            daily_new_words_df = (
+                new_words_chart_df
+                .groupby('Saved Date', as_index=False)['New Words']
+                .sum()
+            )
+            new_words_chart = alt.Chart(daily_new_words_df).mark_bar().encode(
+                x=alt.X('Saved Date:T', title='Date'),
                 y=alt.Y('New Words:Q', title='New Words Introduced'),
-                tooltip=['Saved At:T', 'New Words:Q']
+                tooltip=['Saved Date:T', 'New Words:Q']
             ).properties(height=250)
         else:
             new_words_chart = alt.Chart(new_words_df).mark_bar().encode(
