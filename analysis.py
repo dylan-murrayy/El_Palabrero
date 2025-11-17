@@ -6,6 +6,10 @@ import streamlit as st
 from vocabulary import extract_words
 
 
+# Use a stable chat model that works with the chat.completions API.
+ANALYSIS_MODEL = "gpt-4.1-mini"
+
+
 ALLOWED_ERROR_TYPES = [
     "none",
     "grammar",
@@ -102,7 +106,7 @@ def analyze_user_message(user_text: str):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-5-mini",
+            model=ANALYSIS_MODEL,
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_text},
