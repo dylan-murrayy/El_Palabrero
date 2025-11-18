@@ -95,20 +95,11 @@ def main():
     display_chat()
     display_vocabulary_metrics()
 
-    # User input
-    user_input = st.text_input("Escribe tu mensaje en español:")
-    if st.button("Enviar"):
-        if user_input:
-            chat_handling(user_input)
-            st.rerun()
-
-    # Button to save the current chat
-    chat_name = st.text_input("Enter a name for your chat:", key="chat_name")
-    if st.button("Save Chat"):
-        if chat_name.strip():
-            save_chat(chat_name.strip())
-        else:
-            st.warning("Please provide a name before saving your chat.")
+    # User input (chat-style)
+    user_input = st.chat_input("Escribe tu mensaje en español")
+    if user_input:
+        chat_handling(user_input)
+        st.rerun()
 
     # Sidebar for saved chats and analytics
     st.sidebar.header("Session")
@@ -123,6 +114,15 @@ def main():
 
     if st.session_state.pop("just_cleared_chat", False):
         st.sidebar.info("Started a new chat.")
+
+    # Save chat feature moved to sidebar
+    with st.sidebar.expander("Save Current Chat"):
+        chat_name = st.text_input("Chat Name:", key="chat_name")
+        if st.button("Save Chat"):
+            if chat_name.strip():
+                save_chat(chat_name.strip())
+            else:
+                st.sidebar.warning("Please provide a name before saving.")
 
     st.sidebar.header("Saved Chats")
     saved_chats = load_saved_chats()

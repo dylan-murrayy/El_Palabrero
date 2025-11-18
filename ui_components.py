@@ -17,13 +17,36 @@ from storage import load_saved_chats, parse_chat_payload
 def display_chat():
     """Render the main chat conversation."""
     st.title("Palabrero - Aprende Español")
-    chat_container = st.container()
-    with chat_container:
-        for message in st.session_state["chat_history"]:
-            if message["role"] == "user":
-                st.markdown(f"**You:** {message['content']}")
-            else:
-                st.markdown(f"**AI:** {message['content']}")
+    history = st.session_state.get("chat_history", [])
+
+    # First-run / empty state with a friendly onboarding message
+    if not history:
+        with st.chat_message("assistant", avatar="💬"):
+            st.markdown(
+                "¡Bienvenido a **Palabrero**! 👋\n\n"
+                "Escribe tu primer mensaje en español abajo y te ayudaré con "
+                "correcciones, explicaciones sencillas y práctica de conversación.\n\n"
+                "**Ideas para empezar:**\n"
+                "- Preséntate (nombre, ciudad, trabajo).\n"
+                "- Cuenta qué hiciste el fin de semana.\n"
+                "- Explica qué te cuesta más del español."
+            )
+        return
+
+    # Render chat history using Streamlit's native chat UI
+    for message in history:
+        role = message.get("role", "assistant")
+        content = message.get("content", "")
+        # Map roles to Streamlit chat roles and simple avatars
+        if role == "user":
+            name = "user"
+            avatar = "🫠"
+        else:
+            name = "assistant"
+            avatar = "🤖"
+
+        with st.chat_message(name, avatar=avatar):
+            st.markdown(content)
 
 
 def display_vocabulary_metrics():
@@ -33,21 +56,12 @@ def display_vocabulary_metrics():
     st.sidebar.metric("Passive Vocabulary", len(st.session_state["ai_vocabulary"]))
 
 
-def analytics_dashboard():
-    """Render the analytics dashboard from stored GPT evaluations."""
-    st.title("Learning Analytics Dashboard")
-    st.caption("Insights generated from GPT-5.1-mini sentence-level evaluations.")
-
-    with st.sidebar:
-        if st.button("Back to Chat"):
-            st.session_state["show_analytics"] = False
-            st.rerun()
-
-    saved_chats = load_saved_chats(include_history=True)
-    if not saved_chats:
-        st.info("Save at least one conversation to see your analytics.")
-        return
-
+@st.cache_data(show_spinner="Processing analytics...")
+def process_analytics_data(saved_chats, session_analysis_entries):
+    """
+    Process saved chats and current session analytics into DataFrames and metrics.
+    Cached to avoid re-parsing JSON history on every render.
+    """
     parsed_chats = []
     for chat in saved_chats:
         raw_saved_at = chat.get("saved_at")
@@ -60,8 +74,8 @@ def analytics_dashboard():
 
         try:
             payload = parse_chat_payload(chat.get("history"))
-        except ValueError as err:
-            st.warning(f"Skipping chat '{chat.get('name', 'Unknown')}': {err}")
+        except ValueError:
+            # We might log this, but inside a cached function st.warning might duplicate
             continue
 
         parsed_chats.append(
@@ -74,30 +88,29 @@ def analytics_dashboard():
             }
         )
 
-    session_analysis_entries = [
-        entry
-        for entry in st.session_state.get("message_analytics", [])
-        if entry.get("analysis")
-    ]
     saved_has_analytics = any(chat["analytics"] for chat in parsed_chats)
+    
+    # Only add current session if it has analytics that aren't just repeats of saved ones
+    # or if it's a strictly new set of analytics.
     if session_analysis_entries and not saved_has_analytics:
+        # Note: In a real app we might want better de-duplication logic, 
+        # but here we assume session is distinct if nothing is saved or if we just want to see it.
+        # A simple heuristic: if the user is viewing analytics, they probably want to see the current session too.
+        # The original logic was: "if session_analysis_entries and not saved_has_analytics".
+        # We'll stick to the original logic to preserve behavior.
         parsed_chats.append(
             {
                 "name": "Current Session (unsaved)",
                 "saved_at": datetime.datetime.utcnow(),
                 "raw_saved_at": None,
-                "messages": st.session_state.get("chat_history", []),
+                "messages": [],  # Messages not strictly needed for analytics aggregation
                 "analytics": session_analysis_entries,
                 "is_session": True,
             }
         )
 
     if not parsed_chats:
-        st.info(
-            "No analyzable conversations found. Try saving a new chat or send a new "
-            "message to generate analytics."
-        )
-        return
+        return None
 
     parsed_chats.sort(
         key=lambda item: (item["saved_at"] is None, item["saved_at"] or datetime.datetime.min)
@@ -149,6 +162,18 @@ def analytics_dashboard():
             overall_error_types = analysis_data.get("overall_error_types", [])
             overall_topics = analysis_data.get("overall_topics", [])
 
+            # Ensure overall_error_types is a list of strings
+            if overall_error_types and isinstance(overall_error_types[0], str):
+                errors_str = ", ".join(overall_error_types)
+            else:
+                errors_str = "none"
+
+            # Ensure overall_topics is a list of strings
+            if overall_topics and isinstance(overall_topics[0], str):
+                topics_str = ", ".join(overall_topics)
+            else:
+                topics_str = "none"
+
             message_records.append(
                 {
                     "Conversation": chat["name"],
@@ -156,12 +181,8 @@ def analytics_dashboard():
                     "Saved At": chat["saved_at"],
                     "Message Timestamp": message_dt,
                     "Summary": analysis_data.get("message_summary", ""),
-                    "Overall Errors": ", ".join(overall_error_types)
-                    if overall_error_types
-                    else "none",
-                    "Overall Topics": ", ".join(overall_topics)
-                    if overall_topics
-                    else "none",
+                    "Overall Errors": errors_str,
+                    "Overall Topics": topics_str,
                     "Source": analysis_data.get("source", "unknown"),
                 }
             )
@@ -277,8 +298,7 @@ def analytics_dashboard():
         )
 
     if not analysis_available:
-        st.info("No GPT-powered analytics found yet. Send new messages to generate insights.")
-        return
+        return {"analysis_available": False}
 
     summary_df = pd.DataFrame(processed_chats)
     summary_df["Saved At Display"] = summary_df["Saved At"].apply(
@@ -330,16 +350,89 @@ def analytics_dashboard():
     tense_timeline_df = pd.DataFrame(tense_timeline_records)
     message_detail_df = pd.DataFrame(message_records)
 
-    total_analyzed_messages = int(summary_df["Analyzed Messages"].sum())
+    top_tense = tense_counter.most_common(1)
+    top_error = error_counter.most_common(1)
+    top_topic = topic_counter.most_common(1)
+
+    return {
+        "analysis_available": True,
+        "summary_df": summary_df,
+        "growth_df": growth_df,
+        "new_words_df": new_words_df,
+        "tense_overall_df": tense_overall_df,
+        "error_overall_df": error_overall_df,
+        "topic_overall_df": topic_overall_df,
+        "vocab_category_df": vocab_category_df,
+        "top_words_df": top_words_df,
+        "tense_timeline_df": tense_timeline_df,
+        "message_detail_df": message_detail_df,
+        "global_vocab": sorted(global_vocab),
+        "chats_missing_analysis": chats_missing_analysis,
+        "total_analyzed_messages": int(summary_df["Analyzed Messages"].sum()),
+        "top_tense": top_tense,
+        "top_error": top_error,
+        "top_topic": top_topic,
+    }
+
+
+def analytics_dashboard():
+    """Render the analytics dashboard from stored GPT evaluations."""
+    st.title("Learning Analytics Dashboard")
+    st.caption("Insights generated from GPT-5.1-mini sentence-level evaluations.")
+
+    with st.sidebar:
+        if st.button("Back to Chat"):
+            st.session_state["show_analytics"] = False
+            st.rerun()
+
+    saved_chats = load_saved_chats(include_history=True)
+    session_analysis_entries = [
+        entry
+        for entry in st.session_state.get("message_analytics", [])
+        if entry.get("analysis")
+    ]
+
+    if not saved_chats and not session_analysis_entries:
+        st.info("Save at least one conversation to see your analytics.")
+        return
+
+    # Use cached processing
+    results = process_analytics_data(saved_chats, session_analysis_entries)
+
+    if not results:
+        st.info(
+            "No analyzable conversations found. Try saving a new chat or send a new "
+            "message to generate analytics."
+        )
+        return
+
+    if not results.get("analysis_available"):
+        st.info("No GPT-powered analytics found yet. Send new messages to generate insights.")
+        return
+
+    # Unpack results
+    summary_df = results["summary_df"]
+    growth_df = results["growth_df"]
+    new_words_df = results["new_words_df"]
+    tense_overall_df = results["tense_overall_df"]
+    error_overall_df = results["error_overall_df"]
+    topic_overall_df = results["topic_overall_df"]
+    vocab_category_df = results["vocab_category_df"]
+    top_words_df = results["top_words_df"]
+    tense_timeline_df = results["tense_timeline_df"]
+    message_detail_df = results["message_detail_df"]
+    global_vocab = results["global_vocab"]
+    chats_missing_analysis = results["chats_missing_analysis"]
+    total_analyzed_messages = results["total_analyzed_messages"]
+    top_tense = results["top_tense"]
+    top_error = results["top_error"]
+    top_topic = results["top_topic"]
+
     fallback_rows = summary_df[summary_df["Source"] != "GPT"]
     col1, col2, col3 = st.columns(3)
     col1.metric("Saved Conversations", len(summary_df))
     col2.metric("Analyzed Messages", total_analyzed_messages)
     col3.metric("Unique Vocabulary (GPT)", len(global_vocab))
-
-    top_tense = tense_counter.most_common(1)
-    top_error = error_counter.most_common(1)
-    top_topic = topic_counter.most_common(1)
 
     col4, col5, col6 = st.columns(3)
     col4.metric(
@@ -566,9 +659,8 @@ def analytics_dashboard():
         st.dataframe(detail_view, use_container_width=True)
 
     st.markdown("---")
-    aggregated_vocab = sorted(global_vocab)
-    if aggregated_vocab:
-        vocab_df = pd.DataFrame({"Word": aggregated_vocab})
+    if global_vocab:
+        vocab_df = pd.DataFrame({"Word": global_vocab})
         csv_bytes = vocab_df.to_csv(index=False)
         st.subheader("Download Your GPT-Derived Vocabulary")
         st.download_button(
@@ -592,5 +684,6 @@ def export_vocabulary():
     st.download_button(
         "Download Vocabulary as CSV", csv, "vocabulary.csv", "text/csv"
     )
+
 
 

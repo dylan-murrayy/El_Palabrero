@@ -1,7 +1,11 @@
 import datetime
 import json
 import re
+from enum import Enum
+from typing import List, Optional
+
 import streamlit as st
+from pydantic import BaseModel
 
 from vocabulary import extract_words
 
@@ -10,61 +14,86 @@ from vocabulary import extract_words
 ANALYSIS_MODEL = "gpt-4.1-mini"
 
 
-ALLOWED_ERROR_TYPES = [
-    "none",
-    "grammar",
-    "conjugation",
-    "agreement",
-    "vocabulary",
-    "orthography",
-    "punctuation",
-    "register",
-    "pronunciation",
-    "other",
-]
+# Enums for Structured Outputs
+class ErrorType(str, Enum):
+    NONE = "none"
+    GRAMMAR = "grammar"
+    CONJUGATION = "conjugation"
+    AGREEMENT = "agreement"
+    VOCABULARY = "vocabulary"
+    ORTHOGRAPHY = "orthography"
+    PUNCTUATION = "punctuation"
+    REGISTER = "register"
+    PRONUNCIATION = "pronunciation"
+    OTHER = "other"
 
-ALLOWED_TENSES = [
-    "present",
-    "preterite",
-    "imperfect",
-    "future",
-    "conditional",
-    "present-perfect",
-    "past-perfect",
-    "future-perfect",
-    "conditional-perfect",
-    "imperative",
-    "present-subjunctive",
-    "imperfect-subjunctive",
-    "other",
-]
+class Tense(str, Enum):
+    PRESENT = "present"
+    PRETERITE = "preterite"
+    IMPERFECT = "imperfect"
+    FUTURE = "future"
+    CONDITIONAL = "conditional"
+    PRESENT_PERFECT = "present-perfect"
+    PAST_PERFECT = "past-perfect"
+    FUTURE_PERFECT = "future-perfect"
+    CONDITIONAL_PERFECT = "conditional-perfect"
+    IMPERATIVE = "imperative"
+    PRESENT_SUBJUNCTIVE = "present-subjunctive"
+    IMPERFECT_SUBJUNCTIVE = "imperfect-subjunctive"
+    OTHER = "other"
 
-ALLOWED_TOPICS = [
-    "everyday-life",
-    "travel",
-    "work-and-studies",
-    "food-and-cooking",
-    "emotions",
-    "culture-and-arts",
-    "technology",
-    "health-and-wellness",
-    "relationships",
-    "current-events",
-    "hobbies",
-    "other",
-]
+class Topic(str, Enum):
+    EVERYDAY_LIFE = "everyday-life"
+    TRAVEL = "travel"
+    WORK_AND_STUDIES = "work-and-studies"
+    FOOD_AND_COOKING = "food-and-cooking"
+    EMOTIONS = "emotions"
+    CULTURE_AND_ARTS = "culture-and-arts"
+    TECHNOLOGY = "technology"
+    HEALTH_AND_WELLNESS = "health-and-wellness"
+    RELATIONSHIPS = "relationships"
+    CURRENT_EVENTS = "current-events"
+    HOBBIES = "hobbies"
+    OTHER = "other"
 
-ALLOWED_VOCAB_CATEGORIES = [
-    "new-word",
-    "advanced-word",
-    "review-word",
-    "idiom",
-    "collocation",
-]
+class VocabCategory(str, Enum):
+    NEW_WORD = "new-word"
+    ADVANCED_WORD = "advanced-word"
+    REVIEW_WORD = "review-word"
+    IDIOM = "idiom"
+    COLLOCATION = "collocation"
+    OTHER = "other"
+
+# Pydantic Models for Structured Outputs
+class VocabularyItem(BaseModel):
+    word: str
+    category: VocabCategory
+    english_gloss: Optional[str] = None
+
+class SentenceAnalysis(BaseModel):
+    sentence_text: str
+    detected_tenses: List[Tense]
+    error_types: List[ErrorType]
+    topics: List[Topic]
+    notable_vocabulary: List[VocabularyItem]
+    feedback: str
+
+class MessageAnalysis(BaseModel):
+    message_summary: str
+    sentences: List[SentenceAnalysis]
+    overall_error_types: List[ErrorType]
+    overall_topics: List[Topic]
+    key_takeaways: str
+
+
+ALLOWED_ERROR_TYPES = [e.value for e in ErrorType]
+ALLOWED_TENSES = [t.value for t in Tense]
+ALLOWED_TOPICS = [t.value for t in Topic]
+ALLOWED_VOCAB_CATEGORIES = [c.value for c in VocabCategory]
 
 
 def analyze_user_message(user_text: str):
-    """Call OpenAI chat completions and parse JSON analysis."""
+    """Call OpenAI chat completions and parse JSON analysis using Structured Outputs."""
     client = st.session_state.get("openai_client")
     if not user_text.strip():
         return None
@@ -74,66 +103,33 @@ def analyze_user_message(user_text: str):
 
     system_message = (
         "Eres Palabrero, un tutor de español.\n"
-        "TAREA: Analiza el mensaje del estudiante y devuelve SOLO un JSON válido (sin texto adicional), "
-        "con este esquema exacto:\n\n"
-        "{\n"
-        '  \"message_summary\": \"resumen breve en español\",\n'
-        '  \"sentences\": [\n'
-        "    {\n"
-        '      \"sentence_text\": \"la oración original\",\n'
-        f'      \"detected_tenses\": [valores de: {", ".join(ALLOWED_TENSES)}],\n'
-        f'      \"error_types\": [valores de: {", ".join(ALLOWED_ERROR_TYPES)}],\n'
-        f'      \"topics\": [valores de: {", ".join(ALLOWED_TOPICS)}],\n'
-        '      \"notable_vocabulary\": [\n'
-        "        {\n"
-        '          \"word\": \"palabra\",\n'
-        f'          \"category\": \"uno de: {", ".join(ALLOWED_VOCAB_CATEGORIES)}\",\n'
-        '          \"english_gloss\": \"significado en inglés (opcional)\"\n'
-        "        }\n"
-        "      ],\n"
-        '      \"feedback\": \"comentario corto en español sobre esa oración\"\n'
-        "    }\n"
-        "  ],\n"
-        f'  \"overall_error_types\": [lista de {", ".join(ALLOWED_ERROR_TYPES)} que más aparecen],\n'
-        f'  \"overall_topics\": [lista de {", ".join(ALLOWED_TOPICS)} que mejor describen el mensaje],\n'
-        '  \"key_takeaways\": \"consejo general en español\"\n'
-        "}\n\n"
-        "Reglas IMPORTANTES:\n"
-        "- Usa SOLO las cadenas permitidas exactamente (mismas minúsculas) para error_types, detected_tenses, topics y category.\n"
-        "- Si no hay errores o temas claros, usa [] (array vacío).\n"
-        "- Responde ÚNICAMENTE con el JSON. Ningún texto antes o después."
+        "TAREA: Analiza el mensaje del estudiante."
     )
 
     try:
-        response = client.chat.completions.create(
+        completion = client.beta.chat.completions.parse(
             model=ANALYSIS_MODEL,
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_text},
             ],
-            max_completion_tokens=800,
+            response_format=MessageAnalysis,
         )
+        
+        analysis_result = completion.choices[0].message.parsed
+        
+        # Convert Pydantic model to dict for compatibility with existing code
+        if analysis_result:
+            parsed = analysis_result.model_dump(mode='json')
+            parsed["source"] = "gpt"
+            return parsed
+        else:
+             return build_fallback_analysis(user_text, reason="empty_parsed_response")
+
     except Exception as err:  # noqa: BLE001
-        st.warning(f"No se pudo analizar el mensaje con gpt-5-mini: {err}")
+        st.warning(f"No se pudo analizar el mensaje con {ANALYSIS_MODEL}: {err}")
         return build_fallback_analysis(user_text, reason=str(err))
 
-    analysis_text = response.choices[0].message.content if response.choices else None
-
-    if not analysis_text:
-        st.info("El modelo no devolvió contenido. Usando análisis heurístico local.")
-        return build_fallback_analysis(user_text, reason="empty_response")
-
-    try:
-        parsed = json.loads(analysis_text)
-        if isinstance(parsed, dict):
-            parsed.setdefault("source", "gpt")
-        return parsed
-    except json.JSONDecodeError as err:
-        st.warning(
-            f"El análisis devuelto no estaba en JSON válido ({err}). "
-            "Usando análisis heurístico local."
-        )
-        return build_fallback_analysis(user_text, reason="json_decode_error")
 
 
 def record_message_analysis(user_text: str, analysis_result):
