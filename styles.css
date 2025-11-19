@@ -270,34 +270,6 @@ button[kind="secondary"]:hover {
     margin-bottom: 0.5rem;
 }
 
-.correction-header {
-    color: #34d399;
-    font-size: 0.85rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 0.5rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.correction-content {
-    color: var(--text-primary);
-    font-size: 0.95rem;
-    line-height: 1.5;
-}
-
-.correction-item {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 0.25rem;
-}
-
-.correction-arrow {
-    color: var(--text-muted);
-}
-
 /* Improved Typography Contrast */
 [data-testid="stMetricLabel"] {
     color: #cbd5e1 !important;

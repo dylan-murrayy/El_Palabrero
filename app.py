@@ -133,27 +133,32 @@ def main():
 
     # Sidebar Navigation
     with st.sidebar:
-        st.title("Palabrero")
+        st.title("Navegación")
         
-        # 1. MAIN NAVIGATION
-        # Use a segmented control look if possible, or just a clean radio
+        # Main View Selection
         view_mode = st.radio(
-            "Navigate",
+            "Ir a:",
             ["Chat", "Analytics"],
-            index=0 if not st.session_state.get("show_analytics") else 1,
-            horizontal=True,
+            index=0 if st.session_state.get("view_mode", "Chat") == "Chat" else 1,
+            key="view_mode_radio",
             label_visibility="collapsed"
         )
+        st.session_state["view_mode"] = view_mode
+
+        # Roleplay Scenario Manager
+        from ui_components import display_scenario_manager, load_scenarios
+        display_scenario_manager()
+
+        st.markdown("---")
         
         # Update show_analytics based on selection
-        if view_mode == "Analytics" and not st.session_state.get("show_analytics"):
+        if st.session_state["view_mode"] == "Analytics" and not st.session_state.get("show_analytics"):
             st.session_state["show_analytics"] = True
             st.rerun()
-        elif view_mode == "Chat" and st.session_state.get("show_analytics"):
+        elif st.session_state["view_mode"] == "Chat" and st.session_state.get("show_analytics"):
             st.session_state["show_analytics"] = False
             st.rerun()
 
-        st.markdown("---")
 
         # 2. SESSION ACTIONS (Grouped)
         st.markdown('<p class="sidebar-header">Current Session</p>', unsafe_allow_html=True)
@@ -167,6 +172,27 @@ def main():
                 st.session_state["show_analytics"] = False
                 st.session_state["message_analytics"] = []
                 st.session_state["just_cleared_chat"] = True
+                
+                # Re-evaluate system prompt based on selected scenario
+                base_prompt = ""
+                try:
+                    with open("system_prompt.md", "r", encoding="utf-8") as f:
+                        base_prompt = f.read()
+                except FileNotFoundError:
+                    base_prompt = "You are a helpful Spanish tutor."
+
+                selected_id = st.session_state.get("selected_scenario_id", "default")
+                
+                scenarios = load_scenarios()
+                selected_scenario = next((s for s in scenarios if s["id"] == selected_id), None)
+                
+                final_prompt = base_prompt
+                if selected_scenario and selected_scenario.get("system_prompt"):
+                    if selected_id != "default":
+                        # For custom scenarios, use their prompt and append a reminder about corrections
+                        final_prompt = selected_scenario["system_prompt"] + "\n\nIMPORTANT: Continue to correct the user's grammar and vocabulary as defined in your original instructions, but stay in character."
+                
+                st.session_state["system_prompt"] = final_prompt
                 st.rerun()
         
         with col_act2:

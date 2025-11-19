@@ -1,9 +1,103 @@
 import datetime
 from collections import Counter
+import json
+import os
+from typing import List, Dict, Any
 
 import altair as alt
 import pandas as pd
 import streamlit as st
+
+from flashcards import generate_cloze_cards, create_mochi_zip
+
+SCENARIOS_FILE = "scenarios.json"
+
+def load_scenarios() -> List[Dict[str, Any]]:
+    """Load scenarios from JSON file."""
+    if not os.path.exists(SCENARIOS_FILE):
+        return []
+    try:
+        with open(SCENARIOS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def save_scenarios(scenarios: List[Dict[str, Any]]):
+    """Save scenarios to JSON file."""
+    with open(SCENARIOS_FILE, "w", encoding="utf-8") as f:
+        json.dump(scenarios, f, indent=4, ensure_ascii=False)
+
+def display_scenario_manager():
+    """Render the scenario selector and manager in the sidebar."""
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Roleplay Scenario")
+    
+    scenarios = load_scenarios()
+    if not scenarios:
+        # Fallback if file missing
+        scenarios = [{"id": "default", "name": "Standard Tutor", "description": "Default mode", "system_prompt": None}]
+    
+    # Selection
+    scenario_names = [s["name"] for s in scenarios]
+    
+    # Determine current index
+    current_id = st.session_state.get("selected_scenario_id", "default")
+    try:
+        current_index = next(i for i, s in enumerate(scenarios) if s["id"] == current_id)
+    except StopIteration:
+        current_index = 0
+        
+    selected_name = st.sidebar.selectbox(
+        "Choose a Scenario",
+        scenario_names,
+        index=current_index,
+        key="scenario_selector"
+    )
+    
+    # Update session state if changed
+    selected_scenario = next(s for s in scenarios if s["name"] == selected_name)
+    if st.session_state.get("selected_scenario_id") != selected_scenario["id"]:
+        st.session_state["selected_scenario_id"] = selected_scenario["id"]
+        st.rerun()
+
+    st.sidebar.caption(selected_scenario.get("description", ""))
+    
+    # Manager (Expander)
+    with st.sidebar.expander("Manage Scenarios"):
+        # Add New
+        with st.form("add_scenario_form"):
+            st.write("Create New Scenario")
+            new_name = st.text_input("Name")
+            new_desc = st.text_input("Description")
+            new_prompt = st.text_area("System Prompt (Instructions for AI)")
+            submitted = st.form_submit_button("Add Scenario")
+            
+            if submitted and new_name and new_prompt:
+                new_id = new_name.lower().replace(" ", "_")
+                new_scenario = {
+                    "id": new_id,
+                    "name": new_name,
+                    "description": new_desc,
+                    "system_prompt": new_prompt
+                }
+                scenarios.append(new_scenario)
+                save_scenarios(scenarios)
+                st.success("Scenario added!")
+                st.rerun()
+        
+        # Delete (only custom ones)
+        custom_scenarios = [s for s in scenarios if s["id"] != "default"]
+        if custom_scenarios:
+            st.write("Delete Scenario")
+            to_delete = st.selectbox("Select to delete", [s["name"] for s in custom_scenarios], key="delete_scenario_select")
+            if st.button("Delete Selected"):
+                scenarios = [s for s in scenarios if s["name"] != to_delete]
+                save_scenarios(scenarios)
+                # Reset to default if deleted current
+                if st.session_state.get("selected_scenario_id") == next((s["id"] for s in custom_scenarios if s["name"] == to_delete), ""):
+                     st.session_state["selected_scenario_id"] = "default"
+                st.success("Deleted.")
+                st.rerun()
 
 from analysis import (
     ALLOWED_ERROR_TYPES,
@@ -87,41 +181,7 @@ def display_chat():
             avatar = "🤖"
 
         with st.chat_message(name, avatar=avatar):
-            # Check for corrections in assistant messages
-            if role == "assistant" and "Correcciones:" in content:
-                parts = content.split("Correcciones:", 1)
-                intro = parts[0].strip()
-                rest = parts[1]
-                
-                # Try to split into corrections and the rest (e.g. "Frase corregida:")
-                if "Frase corregida:" in rest:
-                    corrections_part, final_part = rest.split("Frase corregida:", 1)
-                    final_part = "**Frase corregida:**" + final_part
-                else:
-                    corrections_part = rest
-                    final_part = ""
-                
-                # Render intro if exists
-                if intro:
-                    st.markdown(intro)
-                
-                # Render styled correction card
-                st.markdown(f"""
-                <div class="correction-card">
-                    <div class="correction-header">
-                        <span>✨</span> Correcciones
-                    </div>
-                    <div class="correction-content">
-                        {corrections_part.strip()}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Render the rest
-                if final_part:
-                    st.markdown(final_part)
-            else:
-                st.markdown(content)
+            st.markdown(content)
             
             # Add TTS button for AI messages
             if role == "assistant" and content.strip():
@@ -714,7 +774,7 @@ def analytics_dashboard():
     st.markdown("---")
     
     # === TABS SECTION ===
-    tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Vocabulary", "Grammar", "Topics"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Overview", "Vocabulary", "Grammar", "Topics", "Flashcards"])
     
     # TAB 1: OVERVIEW
     with tab1:
@@ -880,123 +940,84 @@ def analytics_dashboard():
     
     # TAB 3: GRAMMAR
     with tab3:
-        if not tense_overall_df.empty:
+        col1, col2 = st.columns(2)
+        with col1:
             st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
-            st.subheader("Verb Tense Usage")
-            tense_chart = (
-                alt.Chart(tense_overall_df)
-                .mark_bar()
+            st.subheader("Tense Usage")
+            if not tense_overall_df.empty:
+                tense_chart = (
+                    alt.Chart(tense_overall_df)
+                    .mark_arc(innerRadius=50)
+                    .encode(
+                        theta=alt.Theta("Count", stack=True),
+                        color=alt.Color("Tense", legend=None),
+                        tooltip=["Tense", "Count"],
+                    )
+                    .properties(height=250)
+                )
+                st.altair_chart(tense_chart, use_container_width=True)
+                st.dataframe(tense_overall_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No tense data available.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        with col2:
+            st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+            st.subheader("Error Distribution")
+            if not error_overall_df.empty:
+                error_chart = (
+                    alt.Chart(error_overall_df)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("Count", title="Count"),
+                        y=alt.Y("Error Type", sort="-x", title="Error Type"),
+                        color=alt.Color("Error Type", legend=None),
+                        tooltip=["Error Type", "Count"],
+                    )
+                    .properties(height=250)
+                )
+                st.altair_chart(error_chart, use_container_width=True)
+                st.dataframe(error_overall_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No error data available.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        if not tense_timeline_df.empty:
+            st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+            st.subheader("Tense Usage Over Time")
+            timeline_chart = (
+                alt.Chart(tense_timeline_df)
+                .mark_circle()
                 .encode(
-                    x=alt.X("Count:Q", title="Occurrences"),
-                    y=alt.Y("Tense:N", sort="-x", title="Verb Tense"),
-                    tooltip=["Tense:N", "Count:Q"],
+                    x=alt.X("Conversation #:Q", title="Conversation"),
+                    y=alt.Y("Tense", title="Tense"),
+                    size="count()",
+                    color="Tense",
+                    tooltip=["Conversation #", "Tense", "count()"],
                 )
                 .properties(height=300)
             )
-            st.altair_chart(tense_chart, use_container_width=True)
-
-            if not tense_timeline_df.empty:
-                if tense_timeline_df["Message Timestamp"].notna().any():
-                    timeline_df = tense_timeline_df.dropna(subset=["Message Timestamp"]).copy()
-                    timeline_df["Message Timestamp"] = pd.to_datetime(
-                        timeline_df["Message Timestamp"]
-                    )
-                    timeline_chart = (
-                        alt.Chart(timeline_df)
-                        .mark_line(point=True)
-                        .encode(
-                            x=alt.X("Message Timestamp:T", title="Message Timestamp"),
-                            y=alt.Y(
-                                "Count:Q",
-                                aggregate="sum",
-                                title="Occurrences",
-                            ),
-                            color=alt.Color("Tense:N", title="Verb Tense"),
-                            tooltip=["Message Timestamp:T", "Tense:N", "Count:Q"],
-                        )
-                        .properties(height=320)
-                    )
-                else:
-                    timeline_chart = (
-                        alt.Chart(tense_timeline_df)
-                        .mark_line(point=True)
-                        .encode(
-                            x=alt.X("Conversation #:Q", title="Conversation"),
-                            y=alt.Y("Count:Q", aggregate="sum", title="Occurrences"),
-                            color=alt.Color("Tense:N", title="Verb Tense"),
-                            tooltip=["Conversation #:Q", "Tense:N", "Count:Q"],
-                        )
-                        .properties(height=320)
-                    )
-                st.altair_chart(timeline_chart, use_container_width=True)
+            st.altair_chart(timeline_chart, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
-
-        if not error_overall_df.empty:
-            st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
-            st.subheader("Error Type Distribution")
-            error_chart = (
-                alt.Chart(error_overall_df)
-                .mark_bar(color="#E4572E")
-                .encode(
-                    x=alt.X("Count:Q", title="Occurrences"),
-                    y=alt.Y("Error Type:N", sort="-x", title="Error Type"),
-                    tooltip=["Error Type:N", "Count:Q"],
-                )
-                .properties(height=280)
-            )
-            st.altair_chart(error_chart, use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
+            
         # Error Timeline
         if not error_timeline_df.empty:
             st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
             st.subheader("Error Frequency Over Time")
-            
-            # Aggregate by date or conversation
-            if error_timeline_df["Saved At"].notna().any():
-                timeline_data = error_timeline_df.copy()
-                timeline_data["Saved At"] = pd.to_datetime(timeline_data["Saved At"])
-                timeline_agg = timeline_data.groupby("Saved At", as_index=False)["Error Count"].sum()
-                
-                err_time_chart = (
-                    alt.Chart(timeline_agg)
-                    .mark_line(point=True, color="#f43f5e")
-                    .encode(
-                        x=alt.X("Saved At:T", title="Date"),
-                        y=alt.Y("Error Count:Q", title="Total Errors"),
-                        tooltip=["Saved At:T", "Error Count:Q"]
-                    )
-                    .configure_axis(
-                        gridColor="rgba(255, 255, 255, 0.1)",
-                        domainColor="rgba(255, 255, 255, 0.1)",
-                        labelColor="#94a3b8",
-                        titleColor="#94a3b8"
-                    )
-                    .configure_view(strokeWidth=0)
-                    .properties(height=300, background="transparent")
+            error_timeline_chart = (
+                alt.Chart(error_timeline_df)
+                .mark_bar()
+                .encode(
+                    x=alt.X("Conversation #:Q", title="Conversation"),
+                    y=alt.Y("Error Count:Q", title="Errors per Sentence"),
+                    color=alt.Color("Has Error:N", scale={"domain": [True, False], "range": ["#f43f5e", "#10b981"]}),
+                    tooltip=["Conversation", "Error Count", "Has Error"]
                 )
-            else:
-                timeline_agg = error_timeline_df.groupby("Conversation #", as_index=False)["Error Count"].sum()
-                err_time_chart = (
-                    alt.Chart(timeline_agg)
-                    .mark_line(point=True, color="#f43f5e")
-                    .encode(
-                        x=alt.X("Conversation #:Q", title="Conversation"),
-                        y=alt.Y("Error Count:Q", title="Total Errors"),
-                        tooltip=["Conversation #:Q", "Error Count:Q"]
-                    )
-                    .configure_axis(
-                        gridColor="rgba(255, 255, 255, 0.1)",
-                        domainColor="rgba(255, 255, 255, 0.1)",
-                        labelColor="#94a3b8",
-                        titleColor="#94a3b8"
-                    )
-                    .configure_view(strokeWidth=0)
-                    .properties(height=300, background="transparent")
-                )
-            
-            st.altair_chart(err_time_chart, use_container_width=True)
+                .properties(height=300)
+            )
+            st.altair_chart(error_timeline_chart, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
+
 
         # Detailed Feedback Table
         if not recent_errors_df.empty:
@@ -1035,6 +1056,87 @@ def analytics_dashboard():
             )
             st.altair_chart(topic_chart, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
+
+    # TAB 5: FLASHCARDS (MOCHI)
+    with tab5:
+        st.subheader("Mochi Flashcards Generator")
+        st.markdown("""
+        Generate flashcards from your mistakes in selected conversations. 
+        Download the `.mochi` file and import it into [Mochi](https://mochi.cards/).
+        """)
+        
+        # Use the filtered summary to get the relevant chats
+        selected_chat_names = filtered_summary_df["Chat"].unique().tolist()
+        
+        # Initialize session state for cards if not present
+        if "generated_flashcards" not in st.session_state:
+            st.session_state["generated_flashcards"] = []
+
+        if st.button("Generate Flashcards from Filtered View"):
+            target_chats = []
+            
+            # Check saved chats
+            for chat in saved_chats:
+                if chat["name"] in selected_chat_names:
+                    try:
+                        payload = parse_chat_payload(chat.get("history"))
+                        target_chats.append({
+                            "name": chat["name"],
+                            "analytics": payload.get("analytics", [])
+                        })
+                    except:
+                        pass
+            
+            # Check current session
+            if "Current Session (unsaved)" in selected_chat_names:
+                 target_chats.append({
+                    "name": "Current Session",
+                    "analytics": session_analysis_entries
+                })
+            
+            if not target_chats:
+                st.warning("No conversations found to generate cards from.")
+            else:
+                # Generate 10 cards max by default
+                cards = generate_cloze_cards(target_chats, limit=10)
+                
+                if not cards:
+                    st.info("No mistakes found suitable for flashcards in these conversations.")
+                else:
+                    st.session_state["generated_flashcards"] = cards
+                    st.success(f"Generated {len(cards)} flashcards!")
+        
+        # Display and Manage Cards
+        if st.session_state["generated_flashcards"]:
+            cards = st.session_state["generated_flashcards"]
+            st.write(f"**Previewing {len(cards)} cards**")
+            
+            # List cards with delete buttons
+            cards_to_keep = []
+            for i, card in enumerate(cards):
+                with st.expander(f"Card {i+1}: {card['name']}", expanded=False):
+                    st.text_area("Content", card["content"], height=150, key=f"card_preview_{i}", disabled=True)
+                    if not st.checkbox("Delete this card", key=f"delete_card_{i}"):
+                        cards_to_keep.append(card)
+            
+            # Update state if deletions occurred (this logic is a bit tricky in Streamlit immediate mode)
+            # Better approach: "Update Deck" button or just generate download from "cards_to_keep"
+            # But "cards_to_keep" is rebuilt every run based on checkboxes.
+            
+            if len(cards_to_keep) < len(cards):
+                st.warning(f"You have marked {len(cards) - len(cards_to_keep)} cards for deletion. They will be excluded from the download.")
+
+            # Download
+            if cards_to_keep:
+                mochi_zip = create_mochi_zip("Palabrero Mistakes", cards_to_keep)
+                st.download_button(
+                    label="Download .mochi Deck (ZIP)",
+                    data=mochi_zip,
+                    file_name="palabrero_flashcards.mochi",
+                    mime="application/zip"
+                )
+            else:
+                st.error("No cards remaining to download.")
 
     if chats_missing_analysis:
         st.info(
