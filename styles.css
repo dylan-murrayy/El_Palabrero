@@ -1,0 +1,275 @@
+/* Palabrero Custom Styles */
+
+/* Import modern font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* CSS Variables for consistent theming */
+:root {
+    /* Core Colors */
+    --primary-color: #6366f1;
+    /* Indigo 500 */
+    --primary-hover: #4f46e5;
+    /* Indigo 600 */
+    --secondary-color: #10b981;
+    /* Emerald 500 */
+    --accent-color: #f43f5e;
+    /* Rose 500 */
+
+    /* Backgrounds */
+    --bg-dark: #0f172a;
+    /* Slate 900 */
+    --bg-card: rgba(30, 41, 59, 0.7);
+    /* Slate 800 with opacity */
+    --bg-sidebar: #1e293b;
+    /* Slate 800 */
+
+    /* Text */
+    --text-primary: #f8fafc;
+    /* Slate 50 */
+    --text-secondary: #94a3b8;
+    /* Slate 400 */
+    --text-muted: #64748b;
+    /* Slate 500 */
+
+    /* UI Elements */
+    --border-color: rgba(148, 163, 184, 0.1);
+    --border-radius: 16px;
+    --border-radius-sm: 8px;
+
+    /* Chat Bubbles */
+    --user-bubble-bg: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+    --ai-bubble-bg: rgba(51, 65, 85, 0.5);
+    /* Slate 700 with opacity */
+}
+
+/* Global Reset & Typography */
+* {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+code,
+pre {
+    font-family: 'JetBrains Mono', monospace !important;
+}
+
+/* Main App Background */
+.stApp {
+    background-color: var(--bg-dark);
+    background-image:
+        radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(16, 185, 129, 0.1) 0px, transparent 50%);
+    background-attachment: fixed;
+}
+
+/* Sidebar Styling */
+[data-testid="stSidebar"] {
+    background-color: var(--bg-sidebar);
+    border-right: 1px solid var(--border-color);
+}
+
+[data-testid="stSidebar"] hr {
+    margin: 1.5rem 0;
+    border-color: var(--border-color);
+}
+
+/* Streamlit Chat Messages */
+[data-testid="stChatMessage"] {
+    background: transparent !important;
+    padding: 1rem 0 !important;
+    margin-bottom: 0.5rem !important;
+    border: none !important;
+}
+
+/* User Message Bubble */
+[data-testid="stChatMessage"][data-testid*="user"] .stMarkdown {
+    background: var(--user-bubble-bg);
+    color: white;
+    padding: 1rem 1.25rem;
+    border-radius: 16px 16px 4px 16px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    max-width: 85%;
+    margin-left: auto;
+}
+
+/* Assistant Message Bubble */
+[data-testid="stChatMessage"]:not([data-testid*="user"]) .stMarkdown {
+    background: var(--ai-bubble-bg);
+    color: var(--text-primary);
+    padding: 1rem 1.25rem;
+    border-radius: 16px 16px 16px 4px;
+    border: 1px solid var(--border-color);
+    max-width: 85%;
+}
+
+/* Avatars */
+[data-testid="stChatMessageAvatar"] {
+    background: transparent !important;
+    border: none !important;
+}
+
+/* Metrics & Cards */
+[data-testid="stMetric"] {
+    background: var(--bg-card);
+    padding: 1.25rem;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease;
+}
+
+[data-testid="stMetric"]:hover {
+    transform: translateY(-2px);
+    border-color: rgba(99, 102, 241, 0.3);
+}
+
+[data-testid="stMetricLabel"] {
+    color: var(--text-secondary) !important;
+    font-size: 0.875rem !important;
+    font-weight: 500 !important;
+}
+
+[data-testid="stMetricValue"] {
+    color: var(--text-primary) !important;
+    font-weight: 700 !important;
+}
+
+/* Custom Dashboard Card Class */
+.dashboard-card {
+    background: var(--bg-card);
+    padding: 1.5rem;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    margin-bottom: 1.5rem;
+    backdrop-filter: blur(12px);
+}
+
+/* Headers */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    color: var(--text-primary) !important;
+    font-weight: 600 !important;
+    letter-spacing: -0.02em !important;
+}
+
+h1 {
+    font-size: 2.25rem !important;
+}
+
+h2 {
+    font-size: 1.5rem !important;
+}
+
+h3 {
+    font-size: 1.25rem !important;
+}
+
+/* Buttons */
+button[kind="primary"] {
+    background: var(--primary-color) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: var(--border-radius-sm) !important;
+    padding: 0.5rem 1rem !important;
+    font-weight: 500 !important;
+    transition: all 0.2s ease !important;
+    box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.3);
+}
+
+button[kind="primary"]:hover {
+    background: var(--primary-hover) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 8px -1px rgba(99, 102, 241, 0.4);
+}
+
+button[kind="secondary"] {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid var(--border-color) !important;
+    color: var(--text-secondary) !important;
+    border-radius: var(--border-radius-sm) !important;
+}
+
+button[kind="secondary"]:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
+    border-color: var(--text-secondary) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Inputs */
+.stTextInput input,
+.stSelectbox div[data-baseweb="select"],
+.stTextArea textarea {
+    background-color: rgba(15, 23, 42, 0.6) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: var(--border-radius-sm) !important;
+    color: var(--text-primary) !important;
+}
+
+.stTextInput input:focus,
+.stTextArea textarea:focus {
+    border-color: var(--primary-color) !important;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Expander */
+[data-testid="stExpander"] {
+    background: transparent !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: var(--border-radius) !important;
+}
+
+/* Tabs */
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    gap: 1rem;
+    background-color: transparent;
+}
+
+[data-testid="stTabs"] [data-baseweb="tab"] {
+    height: auto;
+    padding: 0.5rem 1rem;
+    background-color: transparent;
+    border-radius: var(--border-radius-sm);
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
+    background-color: rgba(99, 102, 241, 0.1);
+    color: var(--primary-color);
+}
+
+/* Custom Sidebar Header */
+.sidebar-header {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}

@@ -14,6 +14,36 @@ from analysis import (
 from storage import load_saved_chats, parse_chat_payload
 
 
+def generate_tts_audio(text: str, voice: str = "alloy") -> bytes | None:
+    """
+    Generate text-to-speech audio using OpenAI's TTS API.
+    
+    Args:
+        text: The text to convert to speech
+        voice: The voice to use (alloy, echo, fable, onyx, nova, shimmer)
+    
+    Returns:
+        Audio bytes in MP3 format, or None if generation fails
+    """
+    client = st.session_state.get("openai_client")
+    if not client:
+        return None
+    
+    if not text or not text.strip():
+        return None
+    
+    try:
+        response = client.audio.speech.create(
+            model="tts-1",
+            voice=voice,
+            input=text,
+        )
+        return response.content
+    except Exception as err:  # noqa: BLE001
+        st.warning(f"Error generating speech: {err}")
+        return None
+
+
 def display_chat():
     """Render the main chat conversation."""
     st.title("Palabrero - Aprende Español")
@@ -21,20 +51,31 @@ def display_chat():
 
     # First-run / empty state with a friendly onboarding message
     if not history:
-        with st.chat_message("assistant", avatar="💬"):
-            st.markdown(
-                "¡Bienvenido a **Palabrero**! 👋\n\n"
-                "Escribe tu primer mensaje en español abajo y te ayudaré con "
-                "correcciones, explicaciones sencillas y práctica de conversación.\n\n"
-                "**Ideas para empezar:**\n"
-                "- Preséntate (nombre, ciudad, trabajo).\n"
-                "- Cuenta qué hiciste el fin de semana.\n"
-                "- Explica qué te cuesta más del español."
-            )
+        st.markdown("""
+        <div class="dashboard-card" style="text-align: center; padding: 3rem 1rem;">
+            <h1 style="font-size: 3rem; margin-bottom: 1rem;">👋</h1>
+            <h2>¡Bienvenido a Palabrero!</h2>
+            <p style="color: var(--text-secondary); max-width: 600px; margin: 0 auto 2rem auto;">
+                Tu compañero de conversación inteligente. Escribe abajo para empezar a practicar.
+                Te ayudaré con correcciones, vocabulario y gramática.
+            </p>
+            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+                <span style="background: rgba(99, 102, 241, 0.1); color: #818cf8; padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.9rem;">
+                    ✨ Correcciones en tiempo real
+                </span>
+                <span style="background: rgba(16, 185, 129, 0.1); color: #34d399; padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.9rem;">
+                    📊 Análisis de progreso
+                </span>
+                <span style="background: rgba(244, 63, 94, 0.1); color: #fb7185; padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.9rem;">
+                    🗣️ Práctica de conversación
+                </span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         return
 
     # Render chat history using Streamlit's native chat UI
-    for message in history:
+    for idx, message in enumerate(history):
         role = message.get("role", "assistant")
         content = message.get("content", "")
         # Map roles to Streamlit chat roles and simple avatars
@@ -47,6 +88,53 @@ def display_chat():
 
         with st.chat_message(name, avatar=avatar):
             st.markdown(content)
+            
+            # Add TTS button for AI messages
+            if role == "assistant" and content.strip():
+                # Create a unique key for each message's TTS button and audio storage
+                tts_key = f"tts_button_{idx}"
+                tts_audio_key = f"tts_audio_{idx}"
+                tts_generate_key = f"tts_generate_{idx}"
+                tts_autoplay_key = f"tts_autoplay_{idx}"
+                
+                # Initialize audio storage if not exists
+                if tts_audio_key not in st.session_state:
+                    st.session_state[tts_audio_key] = None
+                if tts_generate_key not in st.session_state:
+                    st.session_state[tts_generate_key] = False
+                if tts_autoplay_key not in st.session_state:
+                    st.session_state[tts_autoplay_key] = False
+                
+                # Compact button using columns
+                col1, col2, col3 = st.columns([1, 10, 1])
+                with col1:
+                    if st.button("🔊", key=tts_key, help="Generate and play audio"):
+                        st.session_state[tts_generate_key] = True
+                        st.rerun()
+                
+                # Generate audio if requested or auto-play is enabled for new messages
+                auto_play_enabled = st.session_state.get("tts_auto_play", False)
+                is_latest_message = (idx == len(history) - 1)
+                
+                if st.session_state.get(tts_generate_key) or (auto_play_enabled and is_latest_message and st.session_state.get(tts_audio_key) is None):
+                    with st.spinner("Generating audio..."):
+                        audio_bytes = generate_tts_audio(content)
+                        if audio_bytes:
+                            st.session_state[tts_audio_key] = audio_bytes
+                            st.session_state[tts_generate_key] = False
+                            st.session_state[tts_autoplay_key] = True
+                            st.rerun()
+                        else:
+                            st.error("Could not generate audio. Please check your API key and connection.")
+                            st.session_state[tts_generate_key] = False
+                
+                # Display audio player if audio is available
+                if st.session_state.get(tts_audio_key) and isinstance(st.session_state[tts_audio_key], bytes):
+                    autoplay = st.session_state.get(tts_autoplay_key, False)
+                    st.audio(st.session_state[tts_audio_key], format="audio/mp3", autoplay=autoplay)
+                    # Reset autoplay after first play
+                    if autoplay:
+                        st.session_state[tts_autoplay_key] = False
 
 
 def display_vocabulary_metrics():
@@ -129,6 +217,12 @@ def process_analytics_data(saved_chats, session_analysis_entries):
     message_records = []
     analysis_available = False
     chats_missing_analysis = []
+    
+    # New metrics
+    total_sentences = 0
+    error_free_sentences = 0
+    error_timeline_records = []
+    recent_errors = []
 
     for idx, chat in enumerate(parsed_chats, start=1):
         analytics_entries = chat["analytics"]
@@ -226,6 +320,10 @@ def process_analytics_data(saved_chats, session_analysis_entries):
                     normalized_error = (err or "").strip().lower()
                     if normalized_error == "none":
                         continue
+                    # Exclude punctuation from aggregate metrics as per user request
+                    if normalized_error == "punctuation":
+                        continue
+                        
                     if normalized_error not in ALLOWED_ERROR_TYPES:
                         normalized_error = "other"
                     error_counter[normalized_error] += 1
@@ -251,6 +349,40 @@ def process_analytics_data(saved_chats, session_analysis_entries):
                     if normalized_category not in ALLOWED_VOCAB_CATEGORIES:
                         normalized_category = "other"
                     vocab_category_counter[normalized_category] += 1
+                
+                # Proficiency & Error Tracking
+                total_sentences += 1
+                has_error = False
+                current_sentence_errors = []
+                
+                for err in error_types:
+                    normalized_err = (err or "").strip().lower()
+                    if normalized_err != "none" and normalized_err != "punctuation":
+                        has_error = True
+                        current_sentence_errors.append(normalized_err)
+                
+                if not has_error:
+                    error_free_sentences += 1
+                else:
+                    # Add to recent errors
+                    recent_errors.append({
+                        "Saved At": chat["saved_at"],
+                        "Message Timestamp": message_dt,
+                        "Sentence": sentence.get("sentence_text", ""),
+                        "Error Types": ", ".join(current_sentence_errors),
+                        "Feedback": sentence.get("feedback", ""),
+                        "Conversation": chat["name"]
+                    })
+                
+                # Add to timeline (one record per sentence to allow aggregation)
+                error_timeline_records.append({
+                    "Saved At": chat["saved_at"],
+                    "Message Timestamp": message_dt,
+                    "Conversation #": idx,
+                    "Conversation": chat["name"],
+                    "Has Error": has_error,
+                    "Error Count": len(current_sentence_errors)
+                })
 
         if analyzed_messages == 0:
             chats_missing_analysis.append(chat["name"])
@@ -353,6 +485,16 @@ def process_analytics_data(saved_chats, session_analysis_entries):
     top_tense = tense_counter.most_common(1)
     top_error = error_counter.most_common(1)
     top_topic = topic_counter.most_common(1)
+    
+    # Finalize new metrics
+    proficiency_score = (error_free_sentences / total_sentences * 100) if total_sentences > 0 else 0
+    error_timeline_df = pd.DataFrame(error_timeline_records)
+    recent_errors_df = pd.DataFrame(recent_errors)
+    
+    # Sort recent errors by time descending
+    if not recent_errors_df.empty:
+        # Sort by Saved At first (as proxy for time if msg timestamp missing)
+        recent_errors_df.sort_values(by=["Saved At", "Message Timestamp"], ascending=False, inplace=True)
 
     return {
         "analysis_available": True,
@@ -372,6 +514,9 @@ def process_analytics_data(saved_chats, session_analysis_entries):
         "top_tense": top_tense,
         "top_error": top_error,
         "top_topic": top_topic,
+        "proficiency_score": proficiency_score,
+        "error_timeline_df": error_timeline_df,
+        "recent_errors_df": recent_errors_df,
     }
 
 
@@ -427,12 +572,81 @@ def analytics_dashboard():
     top_tense = results["top_tense"]
     top_error = results["top_error"]
     top_topic = results["top_topic"]
-
-    fallback_rows = summary_df[summary_df["Source"] != "GPT"]
+    proficiency_score = results.get("proficiency_score", 0)
+    error_timeline_df = results.get("error_timeline_df", pd.DataFrame())
+    recent_errors_df = results.get("recent_errors_df", pd.DataFrame())
+    
+    # === FILTERS SECTION ===
+    st.markdown("### Filters")
+    col_filter1, col_filter2 = st.columns(2)
+    
+    with col_filter1:
+        # Conversation selector
+        conversation_names = ["All Conversations"] + summary_df["Chat"].tolist()
+        selected_conversations = st.multiselect(
+            "Select Conversations",
+            conversation_names,
+            default=["All Conversations"]
+        )
+    
+    with col_filter2:
+        # Date range filter
+        if not summary_df["Saved At"].dropna().empty:
+            min_date = summary_df["Saved At"].min().date() if pd.notna(summary_df["Saved At"].min()) else None
+            max_date = summary_df["Saved At"].max().date() if pd.notna(summary_df["Saved At"].max()) else None
+            
+            if min_date and max_date:
+                date_range = st.date_input(
+                    "Date Range",
+                    value=(min_date, max_date),
+                    min_value=min_date,
+                    max_value=max_date
+                )
+            else:
+                date_range = None
+        else:
+            date_range = None
+    
+    # Apply filters
+    filtered_summary_df = summary_df.copy()
+    if "All Conversations" not in selected_conversations and selected_conversations:
+        filtered_summary_df = summary_df[summary_df["Chat"].isin(selected_conversations)]
+    
+    if date_range and len(date_range) == 2:
+        start_date, end_date = date_range
+        filtered_summary_df = filtered_summary_df[
+            (filtered_summary_df["Saved At"].dt.date >= start_date) &
+            (filtered_summary_df["Saved At"].dt.date <= end_date)
+        ]
+    
+    # Filter related dataframes
+    filtered_conversation_nums = filtered_summary_df["Conversation #"].tolist()
+    filtered_growth_df = growth_df[growth_df["Conversation #"].isin(filtered_conversation_nums)]
+    filtered_new_words_df = new_words_df[new_words_df["Conversation #"].isin(filtered_conversation_nums)]
+    
+    st.markdown("---")
+    
+    # === ENHANCED METRICS WITH DELTAS ===
+    fallback_rows = filtered_summary_df[filtered_summary_df["Source"] != "GPT"]
+    
+    # Calculate metrics for current and previous period
+    total_conversations = len(filtered_summary_df)
+    total_messages = filtered_summary_df["Analyzed Messages"].sum()
+    
+    # Calculate vocabulary delta (comparing last half vs first half)
+    if len(filtered_growth_df) >= 2:
+        midpoint = len(filtered_growth_df) // 2
+        early_vocab = filtered_growth_df.iloc[:midpoint]["Cumulative Unique Words"].iloc[-1] if midpoint > 0 else 0
+        recent_vocab = filtered_growth_df.iloc[midpoint:]["Cumulative Unique Words"].iloc[-1] if len(filtered_growth_df) > midpoint else 0
+        vocab_delta = recent_vocab - early_vocab
+    else:
+        vocab_delta = 0
+        recent_vocab = filtered_growth_df["Cumulative Unique Words"].iloc[-1] if not filtered_growth_df.empty else 0
+    
     col1, col2, col3 = st.columns(3)
-    col1.metric("Saved Conversations", len(summary_df))
-    col2.metric("Analyzed Messages", total_analyzed_messages)
-    col3.metric("Unique Vocabulary (GPT)", len(global_vocab))
+    col1.metric("Conversations", total_conversations)
+    col2.metric("Analyzed Messages", int(total_messages))
+    col3.metric("Unique Vocabulary", int(recent_vocab), delta=f"{vocab_delta:+d}" if vocab_delta != 0 else None)
 
     col4, col5, col6 = st.columns(3)
     col4.metric(
@@ -447,6 +661,16 @@ def analytics_dashboard():
         "Top Topic",
         f"{top_topic[0][0]} ({top_topic[0][1]})" if top_topic else "N/A",
     )
+    
+    # Proficiency Metric (New)
+    st.markdown("---")
+    col_prof1, col_prof2 = st.columns([1, 3])
+    with col_prof1:
+        st.metric("Grammar Proficiency", f"{proficiency_score:.1f}%", help="Percentage of sentences without errors")
+    with col_prof2:
+        # Simple progress bar for proficiency
+        st.caption("Accuracy Rate")
+        st.progress(min(proficiency_score / 100.0, 1.0))
 
     if not fallback_rows.empty:
         st.info(
@@ -454,221 +678,329 @@ def analytics_dashboard():
         )
 
     st.markdown("---")
+    
+    # === TABS SECTION ===
+    tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Vocabulary", "Grammar", "Topics"])
+    
+    # TAB 1: OVERVIEW
+    with tab1:
+        st.subheader("Conversation Summary")
+        display_df = filtered_summary_df[
+            [
+                "Chat",
+                "Saved At Display",
+                "Source",
+                "Analyzed Messages",
+                "Unique Vocabulary",
+                "Dominant Tense",
+                "Top Error Type",
+                "Primary Topics",
+                "Latest Takeaway",
+            ]
+        ].rename(columns={"Saved At Display": "Saved At"})
+        st.dataframe(display_df, use_container_width=True)
 
-    has_timestamp = not growth_df["Saved At"].dropna().empty
-
-    if not growth_df.empty:
-        if has_timestamp:
-            growth_chart_df = growth_df.dropna(subset=["Saved At"]).copy()
-            growth_chart_df["Saved At"] = pd.to_datetime(growth_chart_df["Saved At"])
-            growth_chart_df["Saved Date"] = growth_chart_df["Saved At"].dt.normalize()
-            daily_growth_df = (
-                growth_chart_df.groupby("Saved Date", as_index=False)["Cumulative Unique Words"]
-                .max()
-            )
-            growth_chart = (
-                alt.Chart(daily_growth_df)
-                .mark_line(point=True)
-                .encode(
-                    x=alt.X("Saved Date:T", title="Date"),
-                    y=alt.Y("Cumulative Unique Words:Q", title="Cumulative Unique Words"),
-                    tooltip=["Saved Date:T", "Cumulative Unique Words:Q"],
+        if not message_detail_df.empty:
+            with st.expander("Message-Level Details"):
+                detail_view = message_detail_df.copy()
+                detail_view["Saved At"] = detail_view["Saved At"].apply(
+                    lambda dt: dt.strftime("%Y-%m-%d %H:%M")
+                    if isinstance(dt, datetime.datetime) and pd.notna(dt)
+                    else "Not recorded"
                 )
-                .properties(height=300)
-            )
-        else:
-            growth_chart = (
-                alt.Chart(growth_df)
-                .mark_line(point=True)
-                .encode(
-                    x=alt.X("Conversation #:Q", title="Conversation"),
-                    y=alt.Y("Cumulative Unique Words:Q", title="Cumulative Unique Words"),
-                    tooltip=["Conversation #:Q", "Cumulative Unique Words:Q"],
+                detail_view["Message Timestamp"] = detail_view["Message Timestamp"].apply(
+                    lambda dt: dt.strftime("%Y-%m-%d %H:%M:%S")
+                    if isinstance(dt, datetime.datetime) and pd.notna(dt)
+                    else "Not recorded"
                 )
-                .properties(height=300)
-            )
-        st.subheader("Vocabulary Growth")
-        st.altair_chart(growth_chart, use_container_width=True)
-
-    if not new_words_df.empty:
-        if has_timestamp:
-            new_words_chart_df = new_words_df.dropna(subset=["Saved At"]).copy()
-            new_words_chart_df["Saved At"] = pd.to_datetime(new_words_chart_df["Saved At"])
-            new_words_chart_df["Saved Date"] = new_words_chart_df["Saved At"].dt.normalize()
-            daily_new_words_df = (
-                new_words_chart_df.groupby("Saved Date", as_index=False)["New Words"].sum()
-            )
-            new_words_chart = (
-                alt.Chart(daily_new_words_df)
-                .mark_bar()
-                .encode(
-                    x=alt.X("Saved Date:T", title="Date"),
-                    y=alt.Y("New Words:Q", title="New Words Introduced"),
-                    tooltip=["Saved Date:T", "New Words:Q"],
+                st.dataframe(detail_view, use_container_width=True)
+    
+    # TAB 2: VOCABULARY
+    with tab2:
+        has_timestamp = not filtered_growth_df["Saved At"].dropna().empty
+        
+        if not filtered_growth_df.empty:
+            st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+            st.subheader("Vocabulary Growth")
+            if has_timestamp:
+                growth_chart_df = filtered_growth_df.dropna(subset=["Saved At"]).copy()
+                growth_chart_df["Saved At"] = pd.to_datetime(growth_chart_df["Saved At"])
+                growth_chart_df["Saved Date"] = growth_chart_df["Saved At"].dt.normalize()
+                daily_growth_df = (
+                    growth_chart_df.groupby("Saved Date", as_index=False)["Cumulative Unique Words"]
+                    .max()
                 )
-                .properties(height=250)
-            )
-        else:
-            new_words_chart = (
-                alt.Chart(new_words_df)
-                .mark_bar()
-                .encode(
-                    x=alt.X("Conversation #:Q", title="Conversation"),
-                    y=alt.Y("New Words:Q", title="New Words Introduced"),
-                    tooltip=["Conversation #:Q", "New Words:Q"],
-                )
-                .properties(height=250)
-            )
-        st.subheader("New Vocabulary Introduced")
-        st.altair_chart(new_words_chart, use_container_width=True)
-
-    if not tense_overall_df.empty:
-        st.subheader("Verb Tense Usage")
-        tense_chart = (
-            alt.Chart(tense_overall_df)
-            .mark_bar()
-            .encode(
-                x=alt.X("Count:Q", title="Occurrences"),
-                y=alt.Y("Tense:N", sort="-x", title="Verb Tense"),
-                tooltip=["Tense:N", "Count:Q"],
-            )
-            .properties(height=300)
-        )
-        st.altair_chart(tense_chart, use_container_width=True)
-
-        if not tense_timeline_df.empty:
-            if tense_timeline_df["Message Timestamp"].notna().any():
-                timeline_df = tense_timeline_df.dropna(subset=["Message Timestamp"]).copy()
-                timeline_df["Message Timestamp"] = pd.to_datetime(
-                    timeline_df["Message Timestamp"]
-                )
-                timeline_chart = (
-                    alt.Chart(timeline_df)
+                growth_chart = (
+                    alt.Chart(daily_growth_df)
                     .mark_line(point=True)
                     .encode(
-                        x=alt.X("Message Timestamp:T", title="Message Timestamp"),
-                        y=alt.Y(
-                            "Count:Q",
-                            aggregate="sum",
-                            title="Occurrences",
-                        ),
-                        color=alt.Color("Tense:N", title="Verb Tense"),
-                        tooltip=["Message Timestamp:T", "Tense:N", "Count:Q"],
+                        x=alt.X("Saved Date:T", title="Date"),
+                        y=alt.Y("Cumulative Unique Words:Q", title="Cumulative Unique Words"),
+                        tooltip=["Saved Date:T", "Cumulative Unique Words:Q"],
                     )
-                    .properties(height=320)
+                    .configure_axis(
+                        gridColor="rgba(255, 255, 255, 0.1)",
+                        domainColor="rgba(255, 255, 255, 0.1)",
+                        labelColor="#94a3b8",
+                        titleColor="#94a3b8"
+                    )
+                    .configure_view(strokeWidth=0)
+                    .properties(height=300, background="transparent")
                 )
             else:
-                timeline_chart = (
-                    alt.Chart(tense_timeline_df)
+                growth_chart = (
+                    alt.Chart(filtered_growth_df)
                     .mark_line(point=True)
                     .encode(
                         x=alt.X("Conversation #:Q", title="Conversation"),
-                        y=alt.Y("Count:Q", aggregate="sum", title="Occurrences"),
-                        color=alt.Color("Tense:N", title="Verb Tense"),
-                        tooltip=["Conversation #:Q", "Tense:N", "Count:Q"],
+                        y=alt.Y("Cumulative Unique Words:Q", title="Cumulative Unique Words"),
+                        tooltip=["Conversation #:Q", "Cumulative Unique Words:Q"],
                     )
-                    .properties(height=320)
+                    .configure_axis(
+                        gridColor="rgba(255, 255, 255, 0.1)",
+                        domainColor="rgba(255, 255, 255, 0.1)",
+                        labelColor="#94a3b8",
+                        titleColor="#94a3b8"
+                    )
+                    .configure_view(strokeWidth=0)
+                    .properties(height=300, background="transparent")
                 )
-            st.altair_chart(timeline_chart, use_container_width=True)
+            st.altair_chart(growth_chart, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
-    if not error_overall_df.empty:
-        st.subheader("Error Type Distribution")
-        error_chart = (
-            alt.Chart(error_overall_df)
-            .mark_bar(color="#E4572E")
-            .encode(
-                x=alt.X("Count:Q", title="Occurrences"),
-                y=alt.Y("Error Type:N", sort="-x", title="Error Type"),
-                tooltip=["Error Type:N", "Count:Q"],
+        if not filtered_new_words_df.empty:
+            st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+            st.subheader("New Vocabulary Introduced")
+            if has_timestamp:
+                new_words_chart_df = filtered_new_words_df.dropna(subset=["Saved At"]).copy()
+                new_words_chart_df["Saved At"] = pd.to_datetime(new_words_chart_df["Saved At"])
+                new_words_chart_df["Saved Date"] = new_words_chart_df["Saved At"].dt.normalize()
+                daily_new_words_df = (
+                    new_words_chart_df.groupby("Saved Date", as_index=False)["New Words"].sum()
+                )
+                new_words_chart = (
+                    alt.Chart(daily_new_words_df)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("Saved Date:T", title="Date"),
+                        y=alt.Y("New Words:Q", title="New Words Introduced"),
+                        tooltip=["Saved Date:T", "New Words:Q"],
+                    )
+                    .properties(height=250)
+                )
+            else:
+                new_words_chart = (
+                    alt.Chart(filtered_new_words_df)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("Conversation #:Q", title="Conversation"),
+                        y=alt.Y("New Words:Q", title="New Words Introduced"),
+                        tooltip=["Conversation #:Q", "New Words:Q"],
+                    )
+                    .properties(height=250)
+                )
+            st.altair_chart(new_words_chart, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        if not vocab_category_df.empty:
+            st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+            st.subheader("Vocabulary Focus Areas")
+            vocab_category_chart = (
+                alt.Chart(vocab_category_df)
+                .mark_bar(color="#FFC914")
+                .encode(
+                    x=alt.X("Count:Q", title="Occurrences"),
+                    y=alt.Y("Category:N", sort="-x", title="Category"),
+                    tooltip=["Category:N", "Count:Q"],
+                )
+                .properties(height=240)
             )
-            .properties(height=280)
-        )
-        st.altair_chart(error_chart, use_container_width=True)
+            st.altair_chart(vocab_category_chart, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
-    if not topic_overall_df.empty:
-        st.subheader("Topic Coverage")
-        topic_chart = (
-            alt.Chart(topic_overall_df)
-            .mark_bar(color="#17BEBB")
-            .encode(
-                x=alt.X("Count:Q", title="Mentions"),
-                y=alt.Y("Topic:N", sort="-x", title="Topic"),
-                tooltip=["Topic:N", "Count:Q"],
+        if not top_words_df.empty:
+            st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+            st.subheader("Top Vocabulary (by frequency)")
+            top_words_chart = (
+                alt.Chart(top_words_df)
+                .mark_bar()
+                .encode(
+                    x=alt.X("Frequency:Q", title="Frequency"),
+                    y=alt.Y("Word:N", sort="-x", title="Word"),
+                    tooltip=["Word:N", "Frequency:Q"],
+                )
+                .properties(height=320)
             )
-            .properties(height=280)
-        )
-        st.altair_chart(topic_chart, use_container_width=True)
-
-    if not vocab_category_df.empty:
-        st.subheader("Vocabulary Focus Areas")
-        vocab_category_chart = (
-            alt.Chart(vocab_category_df)
-            .mark_bar(color="#FFC914")
-            .encode(
-                x=alt.X("Count:Q", title="Occurrences"),
-                y=alt.Y("Category:N", sort="-x", title="Category"),
-                tooltip=["Category:N", "Count:Q"],
+            st.altair_chart(top_words_chart, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        if global_vocab:
+            vocab_df = pd.DataFrame({"Word": global_vocab})
+            csv_bytes = vocab_df.to_csv(index=False)
+            st.download_button(
+                "Download Vocabulary as CSV",
+                csv_bytes,
+                "palabrero_vocabulary.csv",
+                "text/csv",
             )
-            .properties(height=240)
-        )
-        st.altair_chart(vocab_category_chart, use_container_width=True)
-
-    if not top_words_df.empty:
-        st.subheader("Top Vocabulary (by frequency)")
-        top_words_chart = (
-            alt.Chart(top_words_df)
-            .mark_bar()
-            .encode(
-                x=alt.X("Frequency:Q", title="Frequency"),
-                y=alt.Y("Word:N", sort="-x", title="Word"),
-                tooltip=["Word:N", "Frequency:Q"],
+    
+    # TAB 3: GRAMMAR
+    with tab3:
+        if not tense_overall_df.empty:
+            st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+            st.subheader("Verb Tense Usage")
+            tense_chart = (
+                alt.Chart(tense_overall_df)
+                .mark_bar()
+                .encode(
+                    x=alt.X("Count:Q", title="Occurrences"),
+                    y=alt.Y("Tense:N", sort="-x", title="Verb Tense"),
+                    tooltip=["Tense:N", "Count:Q"],
+                )
+                .properties(height=300)
             )
-            .properties(height=320)
-        )
-        st.altair_chart(top_words_chart, use_container_width=True)
+            st.altair_chart(tense_chart, use_container_width=True)
 
-    st.subheader("Conversation Summary")
-    display_df = summary_df[
-        [
-            "Chat",
-            "Saved At Display",
-            "Source",
-            "Analyzed Messages",
-            "Unique Vocabulary",
-            "Dominant Tense",
-            "Top Error Type",
-            "Primary Topics",
-            "Latest Takeaway",
-        ]
-    ].rename(columns={"Saved At Display": "Saved At"})
-    st.dataframe(display_df, use_container_width=True)
+            if not tense_timeline_df.empty:
+                if tense_timeline_df["Message Timestamp"].notna().any():
+                    timeline_df = tense_timeline_df.dropna(subset=["Message Timestamp"]).copy()
+                    timeline_df["Message Timestamp"] = pd.to_datetime(
+                        timeline_df["Message Timestamp"]
+                    )
+                    timeline_chart = (
+                        alt.Chart(timeline_df)
+                        .mark_line(point=True)
+                        .encode(
+                            x=alt.X("Message Timestamp:T", title="Message Timestamp"),
+                            y=alt.Y(
+                                "Count:Q",
+                                aggregate="sum",
+                                title="Occurrences",
+                            ),
+                            color=alt.Color("Tense:N", title="Verb Tense"),
+                            tooltip=["Message Timestamp:T", "Tense:N", "Count:Q"],
+                        )
+                        .properties(height=320)
+                    )
+                else:
+                    timeline_chart = (
+                        alt.Chart(tense_timeline_df)
+                        .mark_line(point=True)
+                        .encode(
+                            x=alt.X("Conversation #:Q", title="Conversation"),
+                            y=alt.Y("Count:Q", aggregate="sum", title="Occurrences"),
+                            color=alt.Color("Tense:N", title="Verb Tense"),
+                            tooltip=["Conversation #:Q", "Tense:N", "Count:Q"],
+                        )
+                        .properties(height=320)
+                    )
+                st.altair_chart(timeline_chart, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
-    if not message_detail_df.empty:
-        st.subheader("Message-Level Details")
-        detail_view = message_detail_df.copy()
-        detail_view["Saved At"] = detail_view["Saved At"].apply(
-            lambda dt: dt.strftime("%Y-%m-%d %H:%M")
-            if isinstance(dt, datetime.datetime) and pd.notna(dt)
-            else "Not recorded"
-        )
-        detail_view["Message Timestamp"] = detail_view["Message Timestamp"].apply(
-            lambda dt: dt.strftime("%Y-%m-%d %H:%M:%S")
-            if isinstance(dt, datetime.datetime) and pd.notna(dt)
-            else "Not recorded"
-        )
-        st.dataframe(detail_view, use_container_width=True)
+        if not error_overall_df.empty:
+            st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+            st.subheader("Error Type Distribution")
+            error_chart = (
+                alt.Chart(error_overall_df)
+                .mark_bar(color="#E4572E")
+                .encode(
+                    x=alt.X("Count:Q", title="Occurrences"),
+                    y=alt.Y("Error Type:N", sort="-x", title="Error Type"),
+                    tooltip=["Error Type:N", "Count:Q"],
+                )
+                .properties(height=280)
+            )
+            st.altair_chart(error_chart, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown("---")
-    if global_vocab:
-        vocab_df = pd.DataFrame({"Word": global_vocab})
-        csv_bytes = vocab_df.to_csv(index=False)
-        st.subheader("Download Your GPT-Derived Vocabulary")
-        st.download_button(
-            "Download Vocabulary as CSV",
-            csv_bytes,
-            "palabrero_vocabulary.csv",
-            "text/csv",
-        )
+        # Error Timeline
+        if not error_timeline_df.empty:
+            st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+            st.subheader("Error Frequency Over Time")
+            
+            # Aggregate by date or conversation
+            if error_timeline_df["Saved At"].notna().any():
+                timeline_data = error_timeline_df.copy()
+                timeline_data["Saved At"] = pd.to_datetime(timeline_data["Saved At"])
+                timeline_agg = timeline_data.groupby("Saved At", as_index=False)["Error Count"].sum()
+                
+                err_time_chart = (
+                    alt.Chart(timeline_agg)
+                    .mark_line(point=True, color="#f43f5e")
+                    .encode(
+                        x=alt.X("Saved At:T", title="Date"),
+                        y=alt.Y("Error Count:Q", title="Total Errors"),
+                        tooltip=["Saved At:T", "Error Count:Q"]
+                    )
+                    .configure_axis(
+                        gridColor="rgba(255, 255, 255, 0.1)",
+                        domainColor="rgba(255, 255, 255, 0.1)",
+                        labelColor="#94a3b8",
+                        titleColor="#94a3b8"
+                    )
+                    .configure_view(strokeWidth=0)
+                    .properties(height=300, background="transparent")
+                )
+            else:
+                timeline_agg = error_timeline_df.groupby("Conversation #", as_index=False)["Error Count"].sum()
+                err_time_chart = (
+                    alt.Chart(timeline_agg)
+                    .mark_line(point=True, color="#f43f5e")
+                    .encode(
+                        x=alt.X("Conversation #:Q", title="Conversation"),
+                        y=alt.Y("Error Count:Q", title="Total Errors"),
+                        tooltip=["Conversation #:Q", "Error Count:Q"]
+                    )
+                    .configure_axis(
+                        gridColor="rgba(255, 255, 255, 0.1)",
+                        domainColor="rgba(255, 255, 255, 0.1)",
+                        labelColor="#94a3b8",
+                        titleColor="#94a3b8"
+                    )
+                    .configure_view(strokeWidth=0)
+                    .properties(height=300, background="transparent")
+                )
+            
+            st.altair_chart(err_time_chart, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # Detailed Feedback Table
+        if not recent_errors_df.empty:
+            st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+            st.subheader("Recent Areas for Improvement")
+            
+            # Format for display
+            display_errors = recent_errors_df[["Sentence", "Error Types", "Feedback", "Conversation"]].head(10)
+            st.dataframe(
+                display_errors,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Sentence": st.column_config.TextColumn("Sentence", width="medium"),
+                    "Error Types": st.column_config.TextColumn("Error Type", width="small"),
+                    "Feedback": st.column_config.TextColumn("Feedback", width="large"),
+                    "Conversation": st.column_config.TextColumn("Chat", width="small"),
+                }
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
+    
+    # TAB 4: TOPICS
+    with tab4:
+        if not topic_overall_df.empty:
+            st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+            st.subheader("Topic Coverage")
+            topic_chart = (
+                alt.Chart(topic_overall_df)
+                .mark_bar(color="#17BEBB")
+                .encode(
+                    x=alt.X("Count:Q", title="Mentions"),
+                    y=alt.Y("Topic:N", sort="-x", title="Topic"),
+                    tooltip=["Topic:N", "Count:Q"],
+                )
+                .properties(height=280)
+            )
+            st.altair_chart(topic_chart, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
     if chats_missing_analysis:
         st.info(

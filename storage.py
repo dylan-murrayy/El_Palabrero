@@ -126,3 +126,28 @@ def load_chat(name: str):
         st.error(f"An error occurred while loading the chat: {err}")
 
 
+def delete_chats(chat_names: list[str]):
+    """Delete multiple chats from the database by name."""
+    if not chat_names:
+        st.warning("No chats selected for deletion.")
+        return
+    
+    try:
+        conn = sqlite3.connect("palabrero.db")
+        c = conn.cursor()
+        
+        # Delete all chats in the list
+        placeholders = ",".join(["?"] * len(chat_names))
+        c.execute(f"DELETE FROM chats WHERE name IN ({placeholders})", chat_names)
+        
+        deleted_count = c.rowcount
+        conn.commit()
+        conn.close()
+        
+        if deleted_count > 0:
+            st.success(f"Successfully deleted {deleted_count} conversation(s)!")
+        else:
+            st.info("No conversations were deleted.")
+    except sqlite3.Error as err:
+        st.error(f"An error occurred while deleting chats: {err}")
+

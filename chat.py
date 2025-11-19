@@ -61,65 +61,50 @@ def _extract_ai_message(response) -> str:
     return ""
 
 
-def chat_handling(user_input: str) -> str:
-    """Handle the chat flow: send user input + system message to the model."""
-    with st.spinner("Generating AI response..."):
-        client = st.session_state.get("openai_client")
-        if client is None:
-            st.error("OpenAI client is not initialized. Please check your API key.")
-            ai_message = "Lo siento, hubo un problema al inicializar el cliente de OpenAI."
-        else:
-            system_message = {
-                "role": "system",
-                "content": st.session_state.get("system_prompt", ""),
-            }
+from typing import Iterator
 
-            messages = [system_message] + st.session_state["chat_history"] + [
-                {"role": "user", "content": user_input}
-            ]
+def get_chat_stream(user_input: str) -> Iterator[str]:
+    """
+    Generator that yields chunks of the AI response from OpenAI.
+    """
+    client = st.session_state.get("openai_client")
+    if client is None:
+        yield "Lo siento, hubo un problema al inicializar el cliente de OpenAI."
+        return
 
-            try:
-                response = client.chat.completions.create(
-                    model=CHAT_MODEL,
-                    messages=messages,
-                    max_completion_tokens=150,
-                )
-                # Try to extract a normal-text AI message first
-                ai_message = _extract_ai_message(response)
+    system_message = {
+        "role": "system",
+        "content": st.session_state.get("system_prompt", ""),
+    }
 
-                # If we still have nothing, fall back to a debug dump so we can
-                # see what the API actually returned.
-                if not ai_message:
-                    raw_msg = None
-                    try:
-                        if getattr(response, "choices", None):
-                            raw_msg = response.choices[0].message
-                        else:
-                            raw_msg = response
-                    except Exception:  # noqa: BLE001
-                        raw_msg = response
+    messages = [system_message] + st.session_state["chat_history"] + [
+        {"role": "user", "content": user_input}
+    ]
 
-                    ai_message = (
-                        "[DEBUG] OpenAI devolvió una respuesta sin texto útil.\n\n"
-                        f"Objeto crudo del primer mensaje:\n{raw_msg!r}"
-                    )
-            except Exception as err:  # noqa: BLE001
-                st.error(f"Error al llamar a la API de OpenAI: {err}")
-                ai_message = (
-                    "Lo siento, hubo un error al contactar con la API de OpenAI."
-                )
+    try:
+        stream = client.chat.completions.create(
+            model=CHAT_MODEL,
+            messages=messages,
+            max_completion_tokens=300,
+            stream=True,
+        )
+        
+        for chunk in stream:
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
 
-    # Update chat history (always show *something* to avoid blank AI messages)
-    st.session_state["chat_history"].append({"role": "user", "content": user_input})
-    st.session_state["chat_history"].append(
-        {"role": "assistant", "content": ai_message}
-    )
+    except Exception as err:  # noqa: BLE001
+        yield f"Error al llamar a la API de OpenAI: {err}"
 
+
+def process_chat_turn(user_input: str, ai_response: str):
+    """
+    Handle post-processing after the full response has been received:
+    - Update vocabulary
+    - Run analytics
+    """
     # Update vocabulary and analytics
-    update_vocabulary(user_input, ai_message)
+    update_vocabulary(user_input, ai_response)
     analysis_result = analyze_user_message(user_input)
     record_message_analysis(user_input, analysis_result)
-
-    return ai_message
-
-
