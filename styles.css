@@ -265,11 +265,62 @@ button[kind="secondary"]:hover {
 
 /* Custom Sidebar Header */
 .sidebar-header {
-    font-size: 0.75rem;
+    padding: 1rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.correction-header {
+    color: #34d399;
+    font-size: 0.85rem;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: var(--text-muted);
-    margin-top: 1.5rem;
     margin-bottom: 0.5rem;
-    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.correction-content {
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.correction-item {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.correction-arrow {
+    color: var(--text-muted);
+}
+
+/* Improved Typography Contrast */
+[data-testid="stMetricLabel"] {
+    color: #cbd5e1 !important;
+    /* Slate 300 for better contrast */
+}
+
+.sidebar-header {
+    color: #cbd5e1;
+    /* Slate 300 */
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 640px) {
+    .stApp {
+        padding-top: 3rem;
+        /* Space for mobile header if needed */
+    }
+
+    [data-testid="stSidebar"] {
+        width: 100% !important;
+    }
+
+    .stChatInput {
+        padding-bottom: 1rem !important;
+    }
 }

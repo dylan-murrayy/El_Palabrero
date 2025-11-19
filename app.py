@@ -132,90 +132,103 @@ def main():
         st.rerun()
 
     # Sidebar Navigation
-    st.sidebar.title("Palabrero")
-    
-    # 1. VIEW MODE
-    st.sidebar.markdown('<p class="sidebar-header">Navigation</p>', unsafe_allow_html=True)
-    view_mode = st.sidebar.radio(
-        "View",
-        ["Chat", "Analytics"],
-        index=0 if not st.session_state.get("show_analytics") else 1,
-        horizontal=False,
-        label_visibility="collapsed"
-    )
-    
-    # Update show_analytics based on selection
-    if view_mode == "Analytics" and not st.session_state.get("show_analytics"):
-        st.session_state["show_analytics"] = True
-        st.rerun()
-    elif view_mode == "Chat" and st.session_state.get("show_analytics"):
-        st.session_state["show_analytics"] = False
-        st.rerun()
-    
-    # 2. SESSION MANAGEMENT
-    st.sidebar.markdown('<p class="sidebar-header">Session</p>', unsafe_allow_html=True)
-    
-    col_new, col_save = st.sidebar.columns([1, 1])
-    with col_new:
-        if st.button("New Chat", use_container_width=True, type="primary"):
-            st.session_state["chat_history"] = []
-            st.session_state["user_vocabulary"] = set()
-            st.session_state["ai_vocabulary"] = set()
-            st.session_state["show_analytics"] = False
-            st.session_state["message_analytics"] = []
-            st.session_state["just_cleared_chat"] = True
+    with st.sidebar:
+        st.title("Palabrero")
+        
+        # 1. MAIN NAVIGATION
+        # Use a segmented control look if possible, or just a clean radio
+        view_mode = st.radio(
+            "Navigate",
+            ["Chat", "Analytics"],
+            index=0 if not st.session_state.get("show_analytics") else 1,
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+        
+        # Update show_analytics based on selection
+        if view_mode == "Analytics" and not st.session_state.get("show_analytics"):
+            st.session_state["show_analytics"] = True
             st.rerun()
-            
-    with st.sidebar.expander("Save Chat", expanded=False):
-        chat_name = st.text_input("Name", placeholder="My Conversation", key="chat_name")
-        if st.button("Save", use_container_width=True):
-            if chat_name.strip():
-                save_chat(chat_name.strip())
-            else:
-                st.warning("Please provide a name.")
+        elif view_mode == "Chat" and st.session_state.get("show_analytics"):
+            st.session_state["show_analytics"] = False
+            st.rerun()
 
-    if st.session_state.pop("just_cleared_chat", False):
-        st.toast("Started a new chat!", icon="✨")
-    
-    # 3. HISTORY
-    st.sidebar.markdown('<p class="sidebar-header">History</p>', unsafe_allow_html=True)
-    saved_chats = load_saved_chats()
-    chat_lookup = {chat["name"]: chat for chat in saved_chats}
+        st.markdown("---")
 
-    def format_chat_option(name: str) -> str:
-        if not name:
-            return "Select a chat..."
-        meta = chat_lookup.get(name, {})
-        saved_at = meta.get("saved_at")
-        if saved_at:
-            try:
-                saved_dt = datetime.datetime.fromisoformat(saved_at)
-                return f"{name} ({saved_dt.strftime('%m/%d')})"
-            except ValueError:
-                return name
-        return name
-
-    chat_options = [""] + [chat["name"] for chat in saved_chats]
-    selected_chat = st.sidebar.selectbox(
-        "Load Chat", chat_options, format_func=format_chat_option,
-        label_visibility="collapsed"
-    )
-    if selected_chat:
-        load_chat(selected_chat)
-        st.rerun()
-    
-    # Delete Conversations
-    if saved_chats:
-        with st.sidebar.expander("Manage Chats"):
-            chats_to_delete = st.multiselect(
-                "Select to delete",
-                [chat["name"] for chat in saved_chats],
-                key="delete_chats_selector"
-            )
-            
-            if st.button("Delete Selected", type="secondary", use_container_width=True, disabled=not chats_to_delete):
-                delete_chats(chats_to_delete)
+        # 2. SESSION ACTIONS (Grouped)
+        st.markdown('<p class="sidebar-header">Current Session</p>', unsafe_allow_html=True)
+        
+        col_act1, col_act2 = st.columns(2)
+        with col_act1:
+            if st.button("New Chat", use_container_width=True, type="primary"):
+                st.session_state["chat_history"] = []
+                st.session_state["user_vocabulary"] = set()
+                st.session_state["ai_vocabulary"] = set()
+                st.session_state["show_analytics"] = False
+                st.session_state["message_analytics"] = []
+                st.session_state["just_cleared_chat"] = True
                 st.rerun()
+        
+        with col_act2:
+            # Save dialog in a popover or expander
+            with st.popover("Save Chat", use_container_width=True):
+                chat_name = st.text_input("Name", placeholder="My Conversation", key="chat_name")
+                if st.button("Confirm Save", use_container_width=True):
+                    if chat_name.strip():
+                        save_chat(chat_name.strip())
+                        st.toast("Chat saved!", icon="💾")
+                    else:
+                        st.warning("Name required.")
+
+        if st.session_state.pop("just_cleared_chat", False):
+            st.toast("Started a new chat!", icon="✨")
+        
+        st.markdown("---")
+
+        # 3. HISTORY MANAGEMENT
+        st.markdown('<p class="sidebar-header">History</p>', unsafe_allow_html=True)
+        saved_chats = load_saved_chats()
+        chat_lookup = {chat["name"]: chat for chat in saved_chats}
+
+        def format_chat_option(name: str) -> str:
+            if not name:
+                return "Select a chat..."
+            meta = chat_lookup.get(name, {})
+            saved_at = meta.get("saved_at")
+            if saved_at:
+                try:
+                    saved_dt = datetime.datetime.fromisoformat(saved_at)
+                    return f"{name} ({saved_dt.strftime('%m/%d')})"
+                except ValueError:
+                    return name
+            return name
+
+        chat_options = [""] + [chat["name"] for chat in saved_chats]
+        
+        # Use a selectbox but styled better via CSS if possible, or just keep it clean
+        selected_chat = st.selectbox(
+            "Load Chat", 
+            chat_options, 
+            format_func=format_chat_option,
+            label_visibility="collapsed",
+            placeholder="Load a saved chat..."
+        )
+        
+        if selected_chat:
+            load_chat(selected_chat)
+            st.rerun()
+        
+        # Delete Mode Toggle
+        if saved_chats:
+            with st.expander("Manage Saved Chats"):
+                chats_to_delete = st.multiselect(
+                    "Select to delete",
+                    [chat["name"] for chat in saved_chats],
+                    key="delete_chats_selector"
+                )
+                if st.button("Delete Selected", type="secondary", use_container_width=True, disabled=not chats_to_delete):
+                    delete_chats(chats_to_delete)
+                    st.rerun()
     
     # 4. VOCABULARY (Only in Chat view)
     if not st.session_state.get("show_analytics"):

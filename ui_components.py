@@ -87,7 +87,41 @@ def display_chat():
             avatar = "🤖"
 
         with st.chat_message(name, avatar=avatar):
-            st.markdown(content)
+            # Check for corrections in assistant messages
+            if role == "assistant" and "Correcciones:" in content:
+                parts = content.split("Correcciones:", 1)
+                intro = parts[0].strip()
+                rest = parts[1]
+                
+                # Try to split into corrections and the rest (e.g. "Frase corregida:")
+                if "Frase corregida:" in rest:
+                    corrections_part, final_part = rest.split("Frase corregida:", 1)
+                    final_part = "**Frase corregida:**" + final_part
+                else:
+                    corrections_part = rest
+                    final_part = ""
+                
+                # Render intro if exists
+                if intro:
+                    st.markdown(intro)
+                
+                # Render styled correction card
+                st.markdown(f"""
+                <div class="correction-card">
+                    <div class="correction-header">
+                        <span>✨</span> Correcciones
+                    </div>
+                    <div class="correction-content">
+                        {corrections_part.strip()}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Render the rest
+                if final_part:
+                    st.markdown(final_part)
+            else:
+                st.markdown(content)
             
             # Add TTS button for AI messages
             if role == "assistant" and content.strip():
